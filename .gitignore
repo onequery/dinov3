@@ -16,3 +16,6 @@ dist/
 
 # Ignore vscode directory
 .vscode/
+
+# exp
+output/
