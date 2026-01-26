@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # MainGear settings (WSL, Single GPU)
-expoert CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0
 set -e
 set -o pipefail
 PYTHONPATH=${PWD} python dinov3/train/train.py \
