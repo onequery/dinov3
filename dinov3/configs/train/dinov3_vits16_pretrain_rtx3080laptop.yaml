@@ -57,7 +57,7 @@ train:
   cudagraphs: false
   cell_augmentation: false
   cell_augmentation_type: hpa
-  sharded_eval_checkpoint: true
+  sharded_eval_checkpoint: false
 student:
   arch: vit_small
   patch_size: 16
