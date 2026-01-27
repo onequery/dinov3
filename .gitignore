@@ -17,5 +17,9 @@ dist/
 # Ignore vscode directory
 .vscode/
 
+# Large files
+*.pth
+dataset*
+
 # exp
 output/
