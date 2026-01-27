@@ -9,7 +9,7 @@ dist/
 **/notebooks
 
 # Ignore shell scripts
-*.sh
+# *.sh
 
 # Ignore swap files
 *.swp
@@ -20,3 +20,6 @@ dist/
 # Large files
 *.pth
 dataset*
+
+# exp
+output/
