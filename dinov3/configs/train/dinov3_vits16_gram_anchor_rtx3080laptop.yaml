@@ -27,7 +27,7 @@ dino:
     start: 1
     peak: 1
     end: 0.5
-    warmup_epochs: 0  # Original: 1000
+    warmup_epochs: 42  # Original: 1000
     cosine_epochs: 1
 ibot:
   loss_weight: 1.0
@@ -51,9 +51,9 @@ gram:
   ckpt: ignore
   it_load_ema_teacher: -1
   rep_update: true
-  update_frequency: 100  # Original: 100000
-  it_first_update: 50  # Original: 1010000
-  max_updates: 1  # Original: 3
+  update_frequency: 400  # Original: 100000
+  it_first_update: 42000  # Original: 1010000
+  max_updates: 3  # Original: 3
   normalized: true
   img_level: true
   remove_neg: false
@@ -65,7 +65,7 @@ gram:
     start: 0
     peak: 0
     end: 2.0
-    warmup_epochs: 0  # Original: 1000
+    warmup_epochs: 42  # Original: 1000
     cosine_epochs: 1
 train:
   batch_size_per_gpu: 2
@@ -73,7 +73,7 @@ train:
   saveckp_freq: 20
   seed: 0
   num_workers: 4
-  OFFICIAL_EPOCH_LENGTH: 100  # Original: 1000
+  OFFICIAL_EPOCH_LENGTH: 1000  # Original: 1000
   monitor_gradient_norm: false
   chunk_schedule: []
   cache_dataset: true
@@ -134,7 +134,7 @@ hrft:
   enabled: false
   checkpoint_path: ''
 optim:
-  epochs: 5  # original: 1200
+  epochs: 50  # original: 1200
   optimizer: adamw
   weight_decay: null
   weight_decay_end: null
@@ -156,13 +156,13 @@ crops:
   global_crops_scale:
   - 0.32
   - 1.0
-  local_crops_number: 2
+  local_crops_number: 4
   local_crops_scale:
   - 0.05
   - 0.32
   global_crops_size: 256
   local_crops_size: 112
-  gram_teacher_crops_size: 256
+  gram_teacher_crops_size: 512
   localcrops_subset_of_globalcrops: false
   share_color_jitter: false
   horizontal_flips: false
@@ -176,7 +176,7 @@ crops:
   - 0.224
   - 0.225
 checkpointing:
-  period: 100  # Original: 1000
+  period: 5000  # Original: 1000
   max_to_keep: 3
   keep_every: 50000
 schedules:
@@ -184,7 +184,7 @@ schedules:
     start: 0
     peak: 3.0e-05
     end: 3.0e-05
-    warmup_epochs: 1  # Original: 100
+    warmup_epochs: 4  # Original: 100
     freeze_last_layer_epochs: 0  # Original: 5
   weight_decay:
     start: 0.04
@@ -195,11 +195,11 @@ schedules:
     start: 0.04
     peak: 0.07
     end: 0.07
-    warmup_epochs: 1  # Original: 100
+    warmup_epochs: 4  # Original: 100
   momentum:
     start: 0.999
     peak: 0.999
     end: 0.999
     warmup_epochs: 0
 evaluation:  # Override default evaluation settings
-  eval_period_iterations: 100
+  eval_period_iterations: 5000
