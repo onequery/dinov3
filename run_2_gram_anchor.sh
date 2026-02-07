@@ -18,11 +18,26 @@ set -o pipefail
 # ===================================
 # A6000 settings (Single GPU) 
 # ===================================
+# --------------------------
+# 1. Gram Anchoring - ImageNet-1k
+# --------------------------
+# export CUDA_VISIBLE_DEVICES=0
+
+# PYTHONPATH=${PWD} python dinov3/train/train.py \
+#     --config-file dinov3/configs/train/dinov3_vits16_gram_anchor_a6000.yaml \
+#     --output-dir output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/2_stage2_gram_anchor \
+#     train.dataset_path=ImageNet:split=TRAIN:root=/mnt/nas/external/public/raw/imagenet-1k:extra=/mnt/nas/external/public/raw/imagenet-1k \
+#     gram.ckpt=output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth \
+#     student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth
+
+# --------------------------
+# 2. Gram Anchoring - CAS-Contrast-FM-3M
+# --------------------------
 export CUDA_VISIBLE_DEVICES=0
 
 PYTHONPATH=${PWD} python dinov3/train/train.py \
     --config-file dinov3/configs/train/dinov3_vits16_gram_anchor_a6000.yaml \
-    --output-dir output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/2_stage2_gram_anchor \
-    train.dataset_path=ImageNet:split=TRAIN:root=/mnt/nas/external/public/raw/imagenet-1k:extra=/mnt/nas/external/public/raw/imagenet-1k \
-    gram.ckpt=output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth \
-    student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth
+    --output-dir output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor \
+    train.dataset_path=ImageNet:split=TRAIN:root=/mnt/nas/snubhcvc/project/cag_fm/pretrain/datasets/images \
+    gram.ckpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth \
+    student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth
