@@ -19,7 +19,7 @@ dist/
 
 # Large files
 *.pth
-dataset*
+# dataset*
 
 # exp
 output/

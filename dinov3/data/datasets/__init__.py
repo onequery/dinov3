@@ -4,6 +4,7 @@
 # the terms of the DINOv3 License Agreement.
 
 from .ade20k import ADE20K
+from .cag_contrast_fm import CAGContrastFM3M
 from .coco_captions import CocoCaptions
 from .image_net import ImageNet
 from .image_net_22k import ImageNet22k
