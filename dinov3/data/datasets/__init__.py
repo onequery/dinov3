@@ -5,6 +5,7 @@
 
 from .ade20k import ADE20K
 from .cag_contrast_fm import CAGContrastFM3M
+from .cag_contrast_fm_continuity import CAGContrastFMContinuityV1
 from .coco_captions import CocoCaptions
 from .image_net import ImageNet
 from .image_net_22k import ImageNet22k

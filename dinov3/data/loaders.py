@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 import torch
 from torch.utils.data import Sampler
 
-from .datasets import ADE20K, CAGContrastFM3M, CocoCaptions, ImageNet, ImageNet22k, NYU
+from .datasets import ADE20K, CAGContrastFM3M, CAGContrastFMContinuityV1, CocoCaptions, ImageNet, ImageNet22k, NYU
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 logger = logging.getLogger("dinov3")
@@ -64,6 +64,10 @@ def _parse_dataset_str(dataset_str: str):
         class_ = CAGContrastFM3M
         if "split" in kwargs:
             kwargs["split"] = CAGContrastFM3M.Split[kwargs["split"]]
+    elif name == "CAGContrastFMContinuityV1":
+        class_ = CAGContrastFMContinuityV1
+        if "split" in kwargs:
+            kwargs["split"] = CAGContrastFMContinuityV1.Split[kwargs["split"]]
     elif name == "ADE20K":
         class_ = ADE20K
         if "split" in kwargs:
