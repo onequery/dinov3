@@ -2,11 +2,15 @@
 set -e
 set -o pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${SCRIPT_DIR}"
+cd "${REPO_ROOT}"
+
 # =====================================================
 # MainGear settings (WSL, Single GPU)
 # =====================================================
 # export CUDA_VISIBLE_DEVICES=0
-
+#
 # PYTHONPATH=${PWD} python dinov3/train/train.py \
 #     --config-file dinov3/configs/train/dinov3_vits16_high_res_adapt_rtx3080laptop.yaml \
 #     --output-dir output/train/2_imagenet1k/3_stage3_high_res_adapt \
@@ -21,7 +25,7 @@ set -o pipefail
 # 1. High-Res Adaptation - ImageNet-1k
 # -------------------------------------------
 # export CUDA_VISIBLE_DEVICES=0
-
+#
 # PYTHONPATH=${PWD} python dinov3/train/train.py \
 #     --config-file dinov3/configs/train/dinov3_vits16_high_res_adapt_a6000.yaml \
 #     --output-dir output/a6000/1_pretrain/dinov3_vits16/2_imagenet1k/3_stage3_high_res_adapt \
@@ -32,11 +36,28 @@ set -o pipefail
 # --------------------------------------------
 # 2. High-Res Adaptation + Continuity - CAS-Contrast-FM-3M
 # --------------------------------------------
-export CUDA_VISIBLE_DEVICES=0
+# export CUDA_VISIBLE_DEVICES=0
+#
+# PYTHONPATH=${PWD} python dinov3/train/train.py \
+#     --config-file dinov3/configs/train/dinov3_vits16_high_res_adapt_continuity_adj_a6000.yaml \
+#     --output-dir output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/3_stage3_high_res_adapt_continuity_adj \
+#     train.dataset_path=CAGContrastFMContinuityV1:split=TRAIN:root=/mnt/nas/snubhcvc/project/cag_fm/pretrain/datasets/images \
+#     gram.ckpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor/eval/training_29999/teacher_checkpoint.pth \
+#     student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor/eval/training_29999/teacher_checkpoint.pth
 
-PYTHONPATH=${PWD} python dinov3/train/train.py \
+# =====================================================
+# A6000 settings (Two GPU, Same Global Batch)
+# =====================================================
+# Preserve the global batch at 16 images/step:
+#   - single GPU: batch_size_per_gpu = 16
+#   - two GPU:    batch_size_per_gpu = 8
+
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
+
+PYTHONPATH=${PWD} torchrun --standalone --nproc_per_node=2 -m dinov3.train.train \
     --config-file dinov3/configs/train/dinov3_vits16_high_res_adapt_continuity_adj_a6000.yaml \
     --output-dir output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/3_stage3_high_res_adapt_continuity_adj \
     train.dataset_path=CAGContrastFMContinuityV1:split=TRAIN:root=/mnt/nas/snubhcvc/project/cag_fm/pretrain/datasets/images \
     gram.ckpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor/eval/training_29999/teacher_checkpoint.pth \
-    student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor/eval/training_29999/teacher_checkpoint.pth
+    student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor/eval/training_29999/teacher_checkpoint.pth \
+    train.batch_size_per_gpu=8
