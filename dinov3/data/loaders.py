@@ -202,6 +202,7 @@ def make_data_loader(
     persistent_workers: bool = False,
     collate_fn: Optional[Callable[[List[T]], Any]] = None,
     worker_init_fn: Optional[Callable[[List[T]], Any]] = None,
+    sampler: Optional[Sampler] = None,
 ):
     """
     Creates a data loader with the specified parameters.
@@ -221,14 +222,17 @@ def make_data_loader(
         worker_init_fn: Optional init function for each dataloader worker.
     """
 
-    sampler = _make_sampler(
-        dataset=dataset,
-        type=sampler_type,
-        shuffle=shuffle,
-        seed=seed,
-        size=sampler_size,
-        advance=sampler_advance,
-    )
+    if sampler is None:
+        sampler = _make_sampler(
+            dataset=dataset,
+            type=sampler_type,
+            shuffle=shuffle,
+            seed=seed,
+            size=sampler_size,
+            advance=sampler_advance,
+        )
+    else:
+        logger.info("sampler: custom")
 
     logger.info("using PyTorch data loader")
     data_loader = torch.utils.data.DataLoader(

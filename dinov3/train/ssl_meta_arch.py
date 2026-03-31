@@ -17,7 +17,14 @@ from dinov3.configs import get_default_config
 from dinov3.data import DataAugmentationDINO
 from dinov3.fsdp.ac_compile_parallelize import ac_compile_parallelize
 from dinov3.layers.dino_head import DINOHead
-from dinov3.loss import DINOLoss, GramLoss, KoLeoLoss, KoLeoLossDistributed, iBOTPatchLoss
+from dinov3.loss import (
+    ContinuityNTXentLoss,
+    DINOLoss,
+    GramLoss,
+    KoLeoLoss,
+    KoLeoLossDistributed,
+    iBOTPatchLoss,
+)
 from dinov3.models import build_model_from_cfg
 from dinov3.train.cosine_lr_scheduler import linear_warmup_cosine_decay
 from dinov3.train.param_groups import fuse_params_groups, get_params_groups_with_decay_fsdp
@@ -260,6 +267,54 @@ class SSLMetaArch(nn.Module):
                 f"OPTIONS -- global crops GRAM teacher resize antialias: {cfg.gram.global_teacher_resize_antialias}"
             )
 
+        # Continuity auxiliary
+        self.continuity_enabled = bool(self.cfg.continuity.enabled)
+        self.continuity_mode = self.cfg.continuity.mode
+        self.continuity_loss_schedule = None
+        if self.continuity_enabled:
+            if self.cfg.continuity.loss_type != "ntxent":
+                raise ValueError(f"Unsupported continuity.loss_type={self.cfg.continuity.loss_type}")
+            if self.cfg.continuity.feature_source != "student_global_cls_pre_head":
+                raise ValueError(
+                    "continuity.feature_source must be 'student_global_cls_pre_head' in v1, "
+                    f"got {self.cfg.continuity.feature_source}"
+                )
+            if self.cfg.continuity.feature_pool != "mean_over_global_crops":
+                raise ValueError(
+                    "continuity.feature_pool must be 'mean_over_global_crops' in v1, "
+                    f"got {self.cfg.continuity.feature_pool}"
+                )
+            if not self.cfg.continuity.local_negatives_only:
+                raise ValueError("continuity.local_negatives_only=false is not supported in v1")
+            self.continuity_loss = ContinuityNTXentLoss(
+                temperature=self.cfg.continuity.temperature,
+                normalize=self.cfg.continuity.normalize,
+            )
+            self.continuity_loss_weight = self.cfg.continuity.loss_weight
+            if self.cfg.continuity.get("loss_weight_schedule"):
+                iter_per_epoch = cfg.train.OFFICIAL_EPOCH_LENGTH
+                total_iterations = iter_per_epoch * cfg.optim.epochs
+                schedule_cfg = self.cfg.continuity.loss_weight_schedule
+                self.continuity_loss_schedule = linear_warmup_cosine_decay(
+                    start=schedule_cfg.start,
+                    peak=schedule_cfg.peak,
+                    end=schedule_cfg.end,
+                    warmup_iterations=iter_per_epoch * schedule_cfg.warmup_epochs,
+                    total_iterations=total_iterations,
+                    cosine_iterations=(
+                        iter_per_epoch * schedule_cfg.cosine_epochs
+                        if "cosine_epochs" in schedule_cfg
+                        else None
+                    ),
+                )
+            logger.info("OPTIONS -- CONTINUITY")
+            logger.info(f"OPTIONS -- CONTINUITY -- mode: {self.continuity_mode}")
+            logger.info(f"OPTIONS -- CONTINUITY -- loss_weight: {self.continuity_loss_weight}")
+            logger.info(f"OPTIONS -- CONTINUITY -- temperature: {self.cfg.continuity.temperature}")
+            logger.info(f"OPTIONS -- CONTINUITY -- normalize: {self.cfg.continuity.normalize}")
+            logger.info(f"OPTIONS -- CONTINUITY -- feature_source: {self.cfg.continuity.feature_source}")
+            logger.info(f"OPTIONS -- CONTINUITY -- feature_pool: {self.cfg.continuity.feature_pool}")
+
     def _setup_distillation(self):
         logger.info(f"Performing distillation from {self.cfg.distillation.full_cfg_path}")
 
@@ -372,6 +427,10 @@ class SSLMetaArch(nn.Module):
         mask_indices_list = data["mask_indices_list"].cuda(non_blocking=True)
         masks_weight = data["masks_weight"].cuda(non_blocking=True)
         n_masked_patches_tensor = data["n_masked_patches"].cuda(non_blocking=True)
+        if self.continuity_enabled:
+            continuity_pair_indices = data["continuity_pair_indices"].cuda(non_blocking=True)
+        else:
+            continuity_pair_indices = None
 
         if self.has_gram_teacher:
             assert "collated_gram_teacher_crops" in data, (
@@ -421,6 +480,7 @@ class SSLMetaArch(nn.Module):
             mask_indices_list=mask_indices_list,
             masks_weight=masks_weight,
             iteration=iteration,
+            continuity_pair_indices=continuity_pair_indices,
         )
 
         self.backprop_loss(loss_accumulator)
@@ -592,6 +652,7 @@ class SSLMetaArch(nn.Module):
         mask_indices_list,
         masks_weight,
         iteration,
+        continuity_pair_indices,
     ):
         n_global_crops = student_global["cls_after_head"].shape[0]
         n_local_crops = student_local["cls_after_head"].shape[0]
@@ -680,6 +741,21 @@ class SSLMetaArch(nn.Module):
                         img_level=False,
                     )
                     loss_dict["stats_only/unmasked_gram_loss"] = gram_loss_unmasked
+
+        # Continuity loss
+        if self.continuity_enabled:
+            continuity_features = student_global["cls_pre_head"].mean(dim=0)
+            continuity_loss, continuity_stats = self.continuity_loss(continuity_features, continuity_pair_indices)
+            if self.continuity_loss_schedule is not None:
+                continuity_loss_weight = self.continuity_loss_schedule[iteration]
+            else:
+                continuity_loss_weight = self.continuity_loss_weight
+            loss_accumulator += continuity_loss_weight * continuity_loss
+            loss_dict["continuity_loss"] = continuity_loss
+            loss_dict["continuity_loss_weight"] = continuity_features.new_tensor(
+                float(continuity_loss_weight), dtype=torch.float32
+            )
+            loss_dict.update(continuity_stats)
 
         return loss_accumulator, loss_dict
 

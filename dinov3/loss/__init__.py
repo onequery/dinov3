@@ -3,6 +3,7 @@
 # This software may be used and distributed in accordance with
 # the terms of the DINOv3 License Agreement.
 
+from .continuity_loss import ContinuityNTXentLoss
 from .dino_clstoken_loss import DINOLoss
 from .gram_loss import GramLoss
 from .ibot_patch_loss import iBOTPatchLoss

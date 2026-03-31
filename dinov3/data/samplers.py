@@ -227,3 +227,67 @@ class ShardedInfiniteSampler(Sampler):
             )
             yield from iterable
             self._iter_count += 1
+
+
+class ContinuityPairedInfiniteSampler(Sampler):
+    def __init__(
+        self,
+        *,
+        dataset,
+        mode: str = "adjacent",
+        shuffle: bool = False,
+        seed: int = 0,
+        start: Optional[int] = None,
+        step: Optional[int] = None,
+        advance: int = 0,
+    ):
+        if advance % 2 != 0:
+            raise ValueError(f"continuity paired sampler advance must be even, got {advance}")
+        self._dataset = dataset
+        self._mode = mode
+        self._shuffle = shuffle
+        self._seed = seed
+        self._start = get_rank() if start is None else start
+        self._step = get_world_size() if step is None else step
+        self._advance_pairs = advance // 2
+        self._valid_anchors = np.asarray(dataset.get_valid_anchor_indices(mode), dtype=np.int64)
+        if self._valid_anchors.size == 0:
+            raise ValueError(f"no valid continuity anchors found for mode={mode}")
+
+    def __iter__(self):
+        advance_pairs = self._advance_pairs
+        iter_count = 0
+        if advance_pairs > 0:
+            iter_count = advance_pairs // len(self._valid_anchors)
+            if iter_count > 0:
+                advance_pairs -= iter_count * len(self._valid_anchors)
+
+        iterator = self._shuffled_iterator(iter_count) if self._shuffle else self._iterator()
+        yield from itertools.islice(iterator, advance_pairs * 2, None)
+
+    def _iterator(self):
+        while True:
+            iterable = self._valid_anchors[self._start :: self._step]
+            for anchor_idx in iterable:
+                positive_indices = self._dataset.get_positive_indices(int(anchor_idx), mode=self._mode)
+                if not positive_indices:
+                    continue
+                yield int(anchor_idx)
+                yield int(positive_indices[0])
+
+    def _shuffled_iterator(self, iter_count=0):
+        generator = torch.Generator()
+        anchor_count = int(self._valid_anchors.shape[0])
+        while True:
+            seed = _make_seed(self._seed, self._start, iter_count)
+            generator.manual_seed(seed)
+            perm = torch.randperm(anchor_count, generator=generator, dtype=torch.int64).numpy()
+            iterable = self._valid_anchors[perm][self._start :: self._step]
+            for anchor_idx in iterable:
+                positive_indices = self._dataset.get_positive_indices(int(anchor_idx), mode=self._mode)
+                if not positive_indices:
+                    continue
+                pos_idx = positive_indices[torch.randint(len(positive_indices), (1,), generator=generator).item()]
+                yield int(anchor_idx)
+                yield int(pos_idx)
+            iter_count += 1

@@ -110,6 +110,10 @@ class CAGContrastFMContinuityV1(ExtendedVisionDataset):
         self._adj_indices = np.load(adj_indices_path, mmap_mode=None, allow_pickle=False)
         self._near_offsets = np.load(near_offsets_path, mmap_mode=None, allow_pickle=False)
         self._near_indices = np.load(near_indices_path, mmap_mode=None, allow_pickle=False)
+        self._valid_anchor_indices = {
+            "adjacent": np.flatnonzero(np.diff(self._adj_offsets) > 0).astype(np.int64, copy=False),
+            "nearby": np.flatnonzero(np.diff(self._near_offsets) > 0).astype(np.int64, copy=False),
+        }
 
         sample_count = len(self._image_paths)
         if len(self._sample_to_dicom_idx) != sample_count or len(self._frame_idx) != sample_count:
@@ -157,6 +161,15 @@ class CAGContrastFMContinuityV1(ExtendedVisionDataset):
         start = int(offsets[index])
         end = int(offsets[index + 1])
         return indices[start:end].astype(np.int64, copy=False).tolist()
+
+    def get_valid_anchor_indices(self, mode: str = "adjacent") -> List[int]:
+        if mode in ("adjacent", "strict_adjacent"):
+            key = "adjacent"
+        elif mode == "nearby":
+            key = "nearby"
+        else:
+            raise ValueError(f"unsupported continuity mode: {mode}")
+        return self._valid_anchor_indices[key].tolist()
 
     def get_sample_meta(self, index: int) -> Dict[str, Any]:
         image_relpath = self.get_image_relpath(index)

@@ -17,6 +17,8 @@ def collate_data_and_cast(
     mask_generator=None,
     random_circular_shift=False,
     local_batch_size=None,
+    include_sample_indices=False,
+    require_paired_batch=False,
 ):
     n_global_crops = len(samples_list[0][0]["global_crops"])
     n_local_crops = len(samples_list[0][0]["local_crops"])
@@ -75,6 +77,17 @@ def collate_data_and_cast(
     }
     if collated_gram_teacher_crops is not None:
         out["collated_gram_teacher_crops"] = collated_gram_teacher_crops.to(dtype)
+    if include_sample_indices:
+        sample_indices = torch.tensor([int(s[1][0]) for s in samples_list], dtype=torch.long)
+        out["sample_indices"] = sample_indices
+        if require_paired_batch:
+            batch_size = sample_indices.shape[0]
+            if batch_size % 2 != 0:
+                raise ValueError(f"continuity paired batches require an even batch size, got {batch_size}")
+            pair_indices = torch.arange(batch_size, dtype=torch.long)
+            pair_indices[0::2] += 1
+            pair_indices[1::2] -= 1
+            out["continuity_pair_indices"] = pair_indices
     return out
 
 

@@ -30,10 +30,12 @@ from dinov3.configs import setup_config, setup_job, setup_multidistillation
 from dinov3.data import (
     MaskingGenerator,
     SamplerType,
+    ContinuityPairedInfiniteSampler,
     collate_data_and_cast,
     make_data_loader,
     make_dataset,
     CombinedDataLoader,
+    DatasetWithEnumeratedTargets,
 )
 from dinov3.logging import MetricLogger, setup_logging
 from dinov3.train.cosine_lr_scheduler import CosineScheduler, linear_warmup_cosine_decay
@@ -270,6 +272,14 @@ def build_data_loader_from_cfg(
     model,
     start_iter,
 ):
+    continuity_enabled = bool(cfg.continuity.enabled)
+    if continuity_enabled and cfg.multidistillation.enabled:
+        raise NotImplementedError("continuity auxiliary does not support multidistillation in v1")
+    if continuity_enabled and cfg.train.batch_size_per_gpu % 2 != 0:
+        raise ValueError(
+            f"continuity auxiliary requires an even train.batch_size_per_gpu, got {cfg.train.batch_size_per_gpu}"
+        )
+
     # Collate function
     img_size = cfg.crops.global_crops_size
     patch_size = int(cfg.student.patch_size * cfg.crops.teacher_to_student_resolution_scale)
@@ -302,20 +312,33 @@ def build_data_loader_from_cfg(
         mask_generator=mask_generator,
         random_circular_shift=cfg.ibot.mask_random_circular_shift,
         local_batch_size=local_batch_size,
+        include_sample_indices=continuity_enabled,
+        require_paired_batch=bool(cfg.continuity.require_paired_batch),
     )
     batch_size = dataloader_batch_size_per_gpu
     num_workers = cfg.train.num_workers
     dataset_path = cfg.train.dataset_path
-    dataset = make_dataset(
+    base_dataset = make_dataset(
         dataset_str=dataset_path,
         transform=model.build_data_augmentation_dino(cfg),
         target_transform=lambda _: (),
     )
+    dataset = DatasetWithEnumeratedTargets(base_dataset) if continuity_enabled else base_dataset
 
     if isinstance(dataset, torch.utils.data.IterableDataset):
         sampler_type = SamplerType.INFINITE
     else:
         sampler_type = SamplerType.SHARDED_INFINITE if cfg.train.cache_dataset else SamplerType.INFINITE
+
+    custom_sampler = None
+    if continuity_enabled:
+        custom_sampler = ContinuityPairedInfiniteSampler(
+            dataset=base_dataset,
+            mode=cfg.continuity.mode,
+            shuffle=True,
+            seed=cfg.train.seed + start_iter + 1,
+            advance=start_iter * dataloader_batch_size_per_gpu,
+        )
 
     data_loader = make_data_loader(
         dataset=dataset,
@@ -327,6 +350,7 @@ def build_data_loader_from_cfg(
         sampler_advance=start_iter * dataloader_batch_size_per_gpu,
         drop_last=True,
         collate_fn=collate_fn,
+        sampler=custom_sampler,
     )
     return data_loader
 
