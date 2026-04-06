@@ -273,11 +273,23 @@ def build_data_loader_from_cfg(
     start_iter,
 ):
     continuity_enabled = bool(cfg.continuity.enabled)
-    if continuity_enabled and cfg.multidistillation.enabled:
-        raise NotImplementedError("continuity auxiliary does not support multidistillation in v1")
-    if continuity_enabled and cfg.train.batch_size_per_gpu % 2 != 0:
+    content_state_enabled = bool(cfg.content_state.enabled)
+    if continuity_enabled and content_state_enabled:
+        raise ValueError("continuity and content_state auxiliaries cannot be enabled at the same time in v1")
+
+    pair_supervision_enabled = continuity_enabled or content_state_enabled
+    pair_mode = cfg.continuity.mode if continuity_enabled else cfg.content_state.mode
+    require_paired_batch = (
+        bool(cfg.continuity.require_paired_batch)
+        if continuity_enabled
+        else bool(cfg.content_state.require_paired_batch)
+    )
+
+    if pair_supervision_enabled and cfg.multidistillation.enabled:
+        raise NotImplementedError("paired auxiliary training does not support multidistillation in v1")
+    if pair_supervision_enabled and cfg.train.batch_size_per_gpu % 2 != 0:
         raise ValueError(
-            f"continuity auxiliary requires an even train.batch_size_per_gpu, got {cfg.train.batch_size_per_gpu}"
+            f"paired auxiliary training requires an even train.batch_size_per_gpu, got {cfg.train.batch_size_per_gpu}"
         )
 
     # Collate function
@@ -312,8 +324,8 @@ def build_data_loader_from_cfg(
         mask_generator=mask_generator,
         random_circular_shift=cfg.ibot.mask_random_circular_shift,
         local_batch_size=local_batch_size,
-        include_sample_indices=continuity_enabled,
-        require_paired_batch=bool(cfg.continuity.require_paired_batch),
+        include_sample_indices=pair_supervision_enabled,
+        require_paired_batch=require_paired_batch,
     )
     batch_size = dataloader_batch_size_per_gpu
     num_workers = cfg.train.num_workers
@@ -323,7 +335,7 @@ def build_data_loader_from_cfg(
         transform=model.build_data_augmentation_dino(cfg),
         target_transform=lambda _: (),
     )
-    dataset = DatasetWithEnumeratedTargets(base_dataset) if continuity_enabled else base_dataset
+    dataset = DatasetWithEnumeratedTargets(base_dataset) if pair_supervision_enabled else base_dataset
 
     if isinstance(dataset, torch.utils.data.IterableDataset):
         sampler_type = SamplerType.INFINITE
@@ -331,10 +343,10 @@ def build_data_loader_from_cfg(
         sampler_type = SamplerType.SHARDED_INFINITE if cfg.train.cache_dataset else SamplerType.INFINITE
 
     custom_sampler = None
-    if continuity_enabled:
+    if pair_supervision_enabled:
         custom_sampler = ContinuityPairedInfiniteSampler(
             dataset=base_dataset,
-            mode=cfg.continuity.mode,
+            mode=pair_mode,
             shuffle=True,
             seed=cfg.train.seed + start_iter + 1,
             advance=start_iter * dataloader_batch_size_per_gpu,

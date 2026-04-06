@@ -74,6 +74,25 @@ continuity:
   local_negatives_only: true
   require_paired_batch: true
   log_stats: true
+content_state:
+  enabled: false
+  mode: adjacent
+  feature_source: student_global_cls_pre_head
+  feature_pool: mean_over_global_crops
+  require_paired_batch: true
+  content_temperature: 0.1
+  content_loss_weight: 0.5
+  self_recon_loss_weight: 1.0
+  swap_recon_loss_weight: 1.0
+  decouple_loss_weight: 0.1
+  head_hidden_dim: 384
+  head_out_dim: 384
+  head_nlayers: 2
+  decoder_hidden_dim: 768
+  decoder_nlayers: 2
+  normalize_content: true
+  normalize_state: true
+  recon_target_detach: true
 train:
   batch_size_per_gpu: 64
   dataset_path: ImageNet:split=TRAIN

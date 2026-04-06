@@ -8,8 +8,10 @@ import logging
 from functools import partial
 
 import torch
+import torch.nn.functional as F
 from omegaconf import OmegaConf
 from torch import Tensor, nn
+from torch.nn.init import trunc_normal_
 
 import dinov3.distributed as distributed
 from dinov3.checkpointer import init_fsdp_model_from_checkpoint
@@ -31,6 +33,25 @@ from dinov3.train.param_groups import fuse_params_groups, get_params_groups_with
 from dinov3.utils import count_parameters
 
 logger = logging.getLogger("dinov3")
+
+
+def _build_plain_mlp(nlayers: int, in_dim: int, out_dim: int, hidden_dim: int) -> nn.Module:
+    nlayers = max(int(nlayers), 1)
+    if nlayers == 1:
+        return nn.Linear(in_dim, out_dim)
+
+    layers = [nn.Linear(in_dim, hidden_dim), nn.GELU()]
+    for _ in range(nlayers - 2):
+        layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.GELU()])
+    layers.append(nn.Linear(hidden_dim, out_dim))
+    return nn.Sequential(*layers)
+
+
+def _init_linear_weights(module: nn.Module) -> None:
+    if isinstance(module, nn.Linear):
+        trunc_normal_(module.weight, std=0.02)
+        if module.bias is not None:
+            nn.init.constant_(module.bias, 0)
 
 
 class SSLMetaArch(nn.Module):
@@ -65,6 +86,11 @@ class SSLMetaArch(nn.Module):
         teacher_model_dict["backbone"] = teacher_backbone
         gram_model_dict["backbone"] = gram_backbone
         logger.info(f"OPTIONS -- architecture : embed_dim: {embed_dim}")
+
+        continuity_enabled = bool(self.cfg.continuity.enabled)
+        content_state_enabled = bool(self.cfg.content_state.enabled)
+        if continuity_enabled and content_state_enabled:
+            raise ValueError("continuity and content_state auxiliaries cannot be enabled at the same time in v1")
 
         self.embed_dim = embed_dim  # D
         self.dino_out_dim = cfg.dino.head_n_prototypes  # K
@@ -131,6 +157,44 @@ class SSLMetaArch(nn.Module):
         student_model_dict["ibot_head"] = ibot_head_class()
         teacher_model_dict["ibot_head"] = ibot_head_class()
         self.ibot_patch_loss = iBOTPatchLoss(cfg.ibot.head_n_prototypes)
+
+        if content_state_enabled:
+            if self.cfg.content_state.feature_source != "student_global_cls_pre_head":
+                raise ValueError(
+                    "content_state.feature_source must be 'student_global_cls_pre_head' in v1, "
+                    f"got {self.cfg.content_state.feature_source}"
+                )
+            if self.cfg.content_state.feature_pool != "mean_over_global_crops":
+                raise ValueError(
+                    "content_state.feature_pool must be 'mean_over_global_crops' in v1, "
+                    f"got {self.cfg.content_state.feature_pool}"
+                )
+            if not self.cfg.content_state.require_paired_batch:
+                raise ValueError("content_state.require_paired_batch=false is not supported in v1")
+            if int(self.cfg.content_state.head_out_dim) != embed_dim:
+                raise ValueError(
+                    f"content_state.head_out_dim must match embed_dim={embed_dim} in v1, "
+                    f"got {self.cfg.content_state.head_out_dim}"
+                )
+
+            student_model_dict["content_head"] = _build_plain_mlp(
+                nlayers=self.cfg.content_state.head_nlayers,
+                in_dim=embed_dim,
+                out_dim=int(self.cfg.content_state.head_out_dim),
+                hidden_dim=int(self.cfg.content_state.head_hidden_dim),
+            )
+            student_model_dict["state_head"] = _build_plain_mlp(
+                nlayers=self.cfg.content_state.head_nlayers,
+                in_dim=embed_dim,
+                out_dim=int(self.cfg.content_state.head_out_dim),
+                hidden_dim=int(self.cfg.content_state.head_hidden_dim),
+            )
+            student_model_dict["content_state_decoder"] = _build_plain_mlp(
+                nlayers=self.cfg.content_state.decoder_nlayers,
+                in_dim=2 * int(self.cfg.content_state.head_out_dim),
+                out_dim=embed_dim,
+                hidden_dim=int(self.cfg.content_state.decoder_hidden_dim),
+            )
 
         # Build student and teacher models
         self.student = nn.ModuleDict(student_model_dict)
@@ -268,7 +332,7 @@ class SSLMetaArch(nn.Module):
             )
 
         # Continuity auxiliary
-        self.continuity_enabled = bool(self.cfg.continuity.enabled)
+        self.continuity_enabled = continuity_enabled
         self.continuity_mode = self.cfg.continuity.mode
         self.continuity_loss_schedule = None
         if self.continuity_enabled:
@@ -315,6 +379,48 @@ class SSLMetaArch(nn.Module):
             logger.info(f"OPTIONS -- CONTINUITY -- feature_source: {self.cfg.continuity.feature_source}")
             logger.info(f"OPTIONS -- CONTINUITY -- feature_pool: {self.cfg.continuity.feature_pool}")
 
+        # Content-state auxiliary
+        self.content_state_enabled = content_state_enabled
+        if self.content_state_enabled:
+            self.content_state_mode = self.cfg.content_state.mode
+            self.content_state_content_loss = ContinuityNTXentLoss(
+                temperature=self.cfg.content_state.content_temperature,
+                normalize=False,
+            )
+            self.content_state_content_loss_weight = float(self.cfg.content_state.content_loss_weight)
+            self.content_state_self_recon_loss_weight = float(self.cfg.content_state.self_recon_loss_weight)
+            self.content_state_swap_recon_loss_weight = float(self.cfg.content_state.swap_recon_loss_weight)
+            self.content_state_decouple_loss_weight = float(self.cfg.content_state.decouple_loss_weight)
+            logger.info("OPTIONS -- CONTENT-STATE")
+            logger.info(f"OPTIONS -- CONTENT-STATE -- mode: {self.content_state_mode}")
+            logger.info(
+                f"OPTIONS -- CONTENT-STATE -- feature_source: {self.cfg.content_state.feature_source}"
+            )
+            logger.info(f"OPTIONS -- CONTENT-STATE -- feature_pool: {self.cfg.content_state.feature_pool}")
+            logger.info(
+                f"OPTIONS -- CONTENT-STATE -- content_temperature: {self.cfg.content_state.content_temperature}"
+            )
+            logger.info(
+                f"OPTIONS -- CONTENT-STATE -- weights: content={self.content_state_content_loss_weight}, "
+                f"self_recon={self.content_state_self_recon_loss_weight}, "
+                f"swap_recon={self.content_state_swap_recon_loss_weight}, "
+                f"decouple={self.content_state_decouple_loss_weight}"
+            )
+            logger.info(
+                f"OPTIONS -- CONTENT-STATE -- head_hidden_dim: {self.cfg.content_state.head_hidden_dim}, "
+                f"head_out_dim: {self.cfg.content_state.head_out_dim}, "
+                f"head_nlayers: {self.cfg.content_state.head_nlayers}"
+            )
+            logger.info(
+                f"OPTIONS -- CONTENT-STATE -- decoder_hidden_dim: {self.cfg.content_state.decoder_hidden_dim}, "
+                f"decoder_nlayers: {self.cfg.content_state.decoder_nlayers}"
+            )
+            logger.info(
+                f"OPTIONS -- CONTENT-STATE -- normalize_content: {self.cfg.content_state.normalize_content}, "
+                f"normalize_state: {self.cfg.content_state.normalize_state}, "
+                f"recon_target_detach: {self.cfg.content_state.recon_target_detach}"
+            )
+
     def _setup_distillation(self):
         logger.info(f"Performing distillation from {self.cfg.distillation.full_cfg_path}")
 
@@ -352,14 +458,29 @@ class SSLMetaArch(nn.Module):
         )
         self.teacher = nn.ModuleDict(teacher_model_dict)
 
+    def _sync_model_ema_from_student(self) -> None:
+        student_state = self.student.state_dict()
+        ema_state = self.model_ema.state_dict()
+        if student_state.keys() == ema_state.keys():
+            self.model_ema.load_state_dict(student_state)
+            return
+
+        shared_state = {k: v for k, v in student_state.items() if k in ema_state}
+        msg = self.model_ema.load_state_dict(shared_state, strict=False)
+        logger.info("Initialized model EMA from matching student keys only: %s", msg)
+
     def init_weights(self) -> None:
         # All weights are set to `nan` to ensure we initialize everything explicitly
         self.student.backbone.init_weights()
         self.student.dino_head.init_weights()
         self.student.ibot_head.init_weights()
+        if self.content_state_enabled:
+            self.student.content_head.apply(_init_linear_weights)
+            self.student.state_head.apply(_init_linear_weights)
+            self.student.content_state_decoder.apply(_init_linear_weights)
         self.dino_loss.init_weights()
         self.ibot_patch_loss.init_weights()
-        self.model_ema.load_state_dict(self.student.state_dict())
+        self._sync_model_ema_from_student()
         if self.has_gram_teacher:
             if self.gram_ckpt is not None:
                 logger.info(f"Loading pretrained weights from {self.gram_ckpt}")
@@ -388,8 +509,9 @@ class SSLMetaArch(nn.Module):
                 skip_load_keys=["dino_loss.center", "ibot_patch_loss.center"],
                 keys_not_sharded=["backbone.rope_embed.periods", "qkv.bias_mask"],
                 process_group=distributed.get_process_subgroup(),
+                strict=not self.content_state_enabled,
             )
-            self.model_ema.load_state_dict(self.student.state_dict())
+            self._sync_model_ema_from_student()
         if self.cfg.distillation.enabled:
             if self.cfg.distillation.checkpoint_path != "ignore":
                 logger.info(f"Loading teacher to distil from : {self.cfg.distillation.checkpoint_path}")
@@ -427,7 +549,7 @@ class SSLMetaArch(nn.Module):
         mask_indices_list = data["mask_indices_list"].cuda(non_blocking=True)
         masks_weight = data["masks_weight"].cuda(non_blocking=True)
         n_masked_patches_tensor = data["n_masked_patches"].cuda(non_blocking=True)
-        if self.continuity_enabled:
+        if self.continuity_enabled or self.content_state_enabled:
             continuity_pair_indices = data["continuity_pair_indices"].cuda(non_blocking=True)
         else:
             continuity_pair_indices = None
@@ -756,6 +878,57 @@ class SSLMetaArch(nn.Module):
                 float(continuity_loss_weight), dtype=torch.float32
             )
             loss_dict.update(continuity_stats)
+        elif self.content_state_enabled:
+            if continuity_pair_indices is None:
+                raise ValueError("content_state auxiliary requires continuity_pair_indices in the batch")
+
+            shared_features = student_global["cls_pre_head"].mean(dim=0)
+            target_h = shared_features.detach() if self.cfg.content_state.recon_target_detach else shared_features
+
+            z_content_raw = self.student.content_head(shared_features)
+            z_state_raw = self.student.state_head(shared_features)
+            z_content = (
+                F.normalize(z_content_raw, dim=-1) if self.cfg.content_state.normalize_content else z_content_raw
+            )
+            z_state = F.normalize(z_state_raw, dim=-1) if self.cfg.content_state.normalize_state else z_state_raw
+
+            content_loss, content_stats = self.content_state_content_loss(z_content, continuity_pair_indices)
+
+            recon_self = self.student.content_state_decoder(torch.cat([z_content_raw, z_state_raw], dim=-1))
+            self_recon_cosine = F.cosine_similarity(recon_self, target_h, dim=-1)
+            self_recon_loss = 1.0 - self_recon_cosine.mean()
+
+            pair_h = target_h[continuity_pair_indices]
+            recon_swap = self.student.content_state_decoder(
+                torch.cat([z_content_raw, z_state_raw[continuity_pair_indices]], dim=-1)
+            )
+            swap_recon_cosine = F.cosine_similarity(recon_swap, pair_h, dim=-1)
+            swap_recon_loss = 1.0 - swap_recon_cosine.mean()
+
+            branch_cosine = F.cosine_similarity(z_content, z_state, dim=-1)
+            decouple_loss = branch_cosine.square().mean()
+
+            content_state_aux_loss = (
+                self.content_state_content_loss_weight * content_loss
+                + self.content_state_self_recon_loss_weight * self_recon_loss
+                + self.content_state_swap_recon_loss_weight * swap_recon_loss
+                + self.content_state_decouple_loss_weight * decouple_loss
+            )
+            loss_accumulator += content_state_aux_loss
+
+            loss_dict["content_loss"] = content_loss
+            loss_dict["content_loss_weight"] = shared_features.new_tensor(
+                float(self.content_state_content_loss_weight), dtype=torch.float32
+            )
+            loss_dict["self_recon_loss"] = self_recon_loss
+            loss_dict["swap_recon_loss"] = swap_recon_loss
+            loss_dict["decouple_loss"] = decouple_loss
+            loss_dict["content_state_aux_loss"] = content_state_aux_loss
+            loss_dict["content_pos_cosine_mean"] = content_stats["continuity_pos_cosine_mean"]
+            loss_dict["content_neg_cosine_mean"] = content_stats["continuity_neg_cosine_mean"]
+            loss_dict["content_state_branch_cosine"] = branch_cosine.mean()
+            loss_dict["self_recon_cosine"] = self_recon_cosine.mean()
+            loss_dict["swap_recon_cosine"] = swap_recon_cosine.mean()
 
         return loss_accumulator, loss_dict
 
@@ -790,7 +963,11 @@ class SSLMetaArch(nn.Module):
         if self.ema_params_lists is None:
             student_param_list = []
             teacher_param_list = []
-            for k in self.student.keys():
+            shared_keys = [k for k in self.student.keys() if k in self.model_ema]
+            skipped_keys = [k for k in self.student.keys() if k not in self.model_ema]
+            if skipped_keys:
+                logger.info("Skipping student-only EMA modules: %s", skipped_keys)
+            for k in shared_keys:
                 for ms, mt in zip(self.student[k].parameters(), self.model_ema[k].parameters()):
                     student_param_list += [ms]
                     teacher_param_list += [mt]
