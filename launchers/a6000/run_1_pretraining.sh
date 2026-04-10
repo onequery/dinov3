@@ -3,6 +3,10 @@
 set -e
 set -o pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "${REPO_ROOT}"
+
 # =================================================
 # MainGear settings (WSL, Single GPU)
 # =================================================
@@ -45,3 +49,4 @@ PYTHONPATH=${PWD} python dinov3/train/train.py \
 #   --config-file dinov3/configs/train/dinov3_vits16_pretrain.yaml \
 #   --output-dir output/train/1_stage1_exp_pretraining \
 #   train.dataset_path=ImageNet:split=TRAIN:root=/mnt/nas/external/public/raw/imagenet-1k:extra=/mnt/nas/external/public/raw/imagenet-1k
+

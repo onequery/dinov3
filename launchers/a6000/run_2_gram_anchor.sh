@@ -3,6 +3,10 @@
 set -e
 set -o pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "${REPO_ROOT}"
+
 # ===================================
 # MainGear settings (WSL, Single GPU) 
 # ===================================
@@ -41,3 +45,4 @@ PYTHONPATH=${PWD} python dinov3/train/train.py \
     train.dataset_path=CAGContrastFM3M:split=TRAIN:root=/mnt/nas/snubhcvc/project/cag_fm/pretrain/datasets/images \
     gram.ckpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth \
     student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/1_stage1_pretrain/eval/training_124999/teacher_checkpoint.pth
+

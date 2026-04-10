@@ -3,7 +3,7 @@ set -e
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${SCRIPT_DIR}"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 # =====================================================
@@ -43,3 +43,4 @@ PYTHONPATH=${PWD} torchrun --standalone --nproc_per_node=2 -m dinov3.train.train
     student.resume_from_teacher_chkpt=output/a6000/1_pretrain/dinov3_vits16/3_cagcontfm3m/2_stage2_gram_anchor/eval/training_29999/teacher_checkpoint.pth \
     train.batch_size_per_gpu=8 \
     train.num_workers="${TRAIN_NUM_WORKERS}"
+
