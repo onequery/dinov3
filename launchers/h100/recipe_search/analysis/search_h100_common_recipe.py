@@ -55,10 +55,13 @@ STAGES = {
         "candidates": [72, 68, 64, 56, 48, 32, 24, 16],
         "safe_batch": 16,
         "stability_iters": 50,
+        "reference_epochs": 100,
         "base_lr_peak": 3.0e-05,
         "base_lr_end": 3.0e-05,
-        "base_lr_warmup": 2,
-        "base_teacher_warmup": 2,
+        "base_lr_warmup": 8,
+        "base_teacher_warmup": 8,
+        "base_local_loss_warmup": 83,
+        "base_gram_loss_warmup": 83,
     },
     "stage3": {
         "config": DINO_ROOT
@@ -79,13 +82,13 @@ STAGES = {
 
 GPU_MODES = {
     "single": {
-        "gpu_ids": [6],
-        "cuda_visible_devices": "6",
+        "gpu_ids": [4],
+        "cuda_visible_devices": "4",
         "num_workers": 8,
     },
     "two": {
-        "gpu_ids": [5, 6],
-        "cuda_visible_devices": "5,6",
+        "gpu_ids": [4, 5],
+        "cuda_visible_devices": "4,5",
         "num_workers": 8,
     },
 }
@@ -93,7 +96,7 @@ GPU_MODES = {
 LR_SCALES = [1.0, 0.5, 0.25]
 WARMUP_CANDIDATES = {
     "stage1": [30, 40, 50],
-    "stage2": [2, 5, 10],
+    "stage2": [8, 12, 16],
     "stage3": [0, 2, 5],
 }
 
@@ -119,7 +122,8 @@ def preflight(data_root: Path) -> dict:
     if nvidia.returncode != 0:
         raise RuntimeError(f"nvidia-smi failed:\n{nvidia.stderr}")
     result["nvidia_smi"] = nvidia.stdout
-    for gpu_id in (5, 6):
+    required_gpu_ids = sorted({gpu_id for spec in GPU_MODES.values() for gpu_id in spec["gpu_ids"]})
+    for gpu_id in required_gpu_ids:
         query = run_checked(
             [
                 "nvidia-smi",
@@ -422,7 +426,7 @@ def ensure_stage_bootstrap_ckpt(
         data_root=data_root,
         extra_overrides=extra,
     )
-    results["runs"].append(result)
+    record_run(results, result)
     ckpt = teacher_ckpt(output_dir)
     if result["status"] != "success" or not ckpt.exists():
         return None
@@ -463,7 +467,7 @@ def find_common_batch(stage: str, gpu_mode: str, fp8: bool, data_root: Path, res
                 data_root=data_root,
                 extra_overrides=extra,
             )
-            results["runs"].append(run)
+            record_run(results, run)
             candidate_runs.append(run)
             if run["status"] != "success":
                 candidate_ok = False
@@ -503,7 +507,7 @@ def fit_batch_candidate(stage: str, gpu_mode: str, fp8: bool, batch_per_gpu: int
             data_root=data_root,
             extra_overrides=extra,
         )
-        results["runs"].append(run)
+        record_run(results, run)
         if run["status"] != "success":
             return False
     return True
@@ -541,6 +545,23 @@ def stage_short_stability(
                 lr_warmup=warmup,
                 teacher_warmup=warmup,
             )
+            if stage == "stage2":
+                aux_warmup = int(
+                    round(
+                        STAGES[stage]["base_local_loss_warmup"]
+                        * STAGES[stage]["stability_iters"]
+                        / STAGES[stage]["reference_epochs"]
+                    )
+                )
+                aux_warmup = max(0, min(STAGES[stage]["stability_iters"] - 1, aux_warmup))
+                extra.extend(
+                    [
+                        f"dino.local_loss_weight_schedule.warmup_epochs={aux_warmup}",
+                        "dino.local_loss_weight_schedule.cosine_epochs=1",
+                        f"gram.loss_weight_schedule.warmup_epochs={aux_warmup}",
+                        "gram.loss_weight_schedule.cosine_epochs=1",
+                    ]
+                )
             if prereq_ckpt is not None:
                 extra.extend([f"gram.ckpt={prereq_ckpt}", f"student.resume_from_teacher_chkpt={prereq_ckpt}"])
             suffix = f"stability_vitl_b{batch_per_gpu}_fp8{int(fp8)}_lr{lr_scale}_wu{warmup}"
@@ -558,7 +579,7 @@ def stage_short_stability(
                 data_root=data_root,
                 extra_overrides=extra,
             )
-            results["runs"].append(run)
+            record_run(results, run)
             if run["status"] == "success":
                 chosen = candidate
                 break
@@ -582,6 +603,23 @@ def stage_short_stability(
             lr_warmup=chosen["lr_warmup_epochs"],
             teacher_warmup=chosen["teacher_temp_warmup_epochs"],
         )
+        if stage == "stage2":
+            aux_warmup = int(
+                round(
+                    STAGES[stage]["base_local_loss_warmup"]
+                    * STAGES[stage]["stability_iters"]
+                    / STAGES[stage]["reference_epochs"]
+                )
+            )
+            aux_warmup = max(0, min(STAGES[stage]["stability_iters"] - 1, aux_warmup))
+            extra.extend(
+                [
+                    f"dino.local_loss_weight_schedule.warmup_epochs={aux_warmup}",
+                    "dino.local_loss_weight_schedule.cosine_epochs=1",
+                    f"gram.loss_weight_schedule.warmup_epochs={aux_warmup}",
+                    "gram.loss_weight_schedule.cosine_epochs=1",
+                ]
+            )
         if prereq_ckpt is not None:
             extra.extend([f"gram.ckpt={prereq_ckpt}", f"student.resume_from_teacher_chkpt={prereq_ckpt}"])
         suffix = (
@@ -602,7 +640,7 @@ def stage_short_stability(
             data_root=data_root,
             extra_overrides=extra,
         )
-        results["runs"].append(run)
+        record_run(results, run)
         if run["status"] != "success":
             return None
     return chosen
@@ -625,6 +663,11 @@ def write_results_json(results: dict) -> None:
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     with (OUTPUT_ROOT / "results.json").open("w") as f:
         json.dump(results, f, indent=2)
+
+
+def record_run(results: dict, run: dict) -> None:
+    results["runs"].append(run)
+    write_results_json(results)
 
 
 def write_markdown(results: dict) -> None:
@@ -716,6 +759,12 @@ def search_gpu_mode(gpu_mode: str, data_root: Path, results: dict) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Search H100-common CAG FM recipe.")
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
+    parser.add_argument(
+        "--gpu-mode",
+        choices=("auto", "single", "two"),
+        default="auto",
+        help="Search only the requested GPU mode, or try single then two when set to auto.",
+    )
     args = parser.parse_args()
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -730,9 +779,12 @@ def main() -> int:
     results["preflight"] = preflight(args.data_root)
     write_results_json(results)
 
-    success = search_gpu_mode("single", args.data_root, results)
-    if not success:
-        success = search_gpu_mode("two", args.data_root, results)
+    if args.gpu_mode == "auto":
+        success = search_gpu_mode("single", args.data_root, results)
+        if not success:
+            success = search_gpu_mode("two", args.data_root, results)
+    else:
+        success = search_gpu_mode(args.gpu_mode, args.data_root, results)
 
     if not success:
         results["adopted_gpu_mode"] = "unresolved"

@@ -5,12 +5,13 @@ DINO_ROOT="$(cd "${COMMON_DIR}/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DINO_ROOT}/.." && pwd)"
 
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dinov3_stack}"
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-6}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4,5}"
 DATA_ROOT="${DATA_ROOT:-/mnt/30TB_SSD/heesu/cag_vision_fm/images}"
 OUT_ROOT="${OUT_ROOT:-output/h100/1_pretrain}"
 TRAIN_NUM_WORKERS="${TRAIN_NUM_WORKERS:-8}"
 DRY_RUN="${DRY_RUN:-0}"
 MODELS="${MODELS:-vits vitb vitl}"
+OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 
 die() {
   echo "Error: $*" >&2
@@ -26,6 +27,19 @@ resolve_output_root() {
 }
 
 ABS_OUT_ROOT="$(resolve_output_root)"
+
+cuda_device_count() {
+  local count=0
+  local device
+  for device in ${CUDA_VISIBLE_DEVICES//,/ }; do
+    [[ -n "${device}" ]] || continue
+    count=$((count + 1))
+  done
+  if [[ "${count}" -eq 0 ]]; then
+    count=1
+  fi
+  printf '%s\n' "${count}"
+}
 
 set_model_spec() {
   local model="$1"
@@ -104,11 +118,14 @@ stage_dataset_path() {
 stage_batch_per_gpu() {
   local stage="$1"
   case "${stage}" in
-    stage1|stage2)
+    stage1)
+      printf '80\n'
+      ;;
+    stage2)
       printf '72\n'
       ;;
     stage3)
-      printf '24\n'
+      printf '28\n'
       ;;
     *)
       die "Unknown stage: ${stage}"
@@ -171,13 +188,32 @@ launch_h100_stage() {
 
   local output_dir
   output_dir="$(stage_output_dir "${stage}")"
+  local nproc_per_node
+  nproc_per_node="${NPROC_PER_NODE:-$(cuda_device_count)}"
+  local -a launcher
+  if [[ "${nproc_per_node}" -gt 1 ]]; then
+    launcher=(
+      conda run -n "${CONDA_ENV_NAME}"
+      torchrun
+      --standalone
+      --nproc_per_node="${nproc_per_node}"
+      -m
+      dinov3.train.train
+    )
+  else
+    launcher=(
+      conda run -n "${CONDA_ENV_NAME}"
+      python
+      dinov3/train/train.py
+    )
+  fi
 
   local -a cmd=(
     env
     "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
     "PYTHONPATH=${DINO_ROOT}"
-    conda run -n "${CONDA_ENV_NAME}" python
-    dinov3/train/train.py
+    "OMP_NUM_THREADS=${OMP_NUM_THREADS}"
+    "${launcher[@]}"
     --config-file "$(stage_config_file "${stage}")"
     --output-dir "${output_dir}"
     "train.dataset_path=$(stage_dataset_path "${stage}")"
@@ -193,5 +229,6 @@ launch_h100_stage() {
 
   echo "==> ${stage} | ${MODEL_NAME}"
   echo "    output_dir=${output_dir}"
+  echo "    cuda_visible_devices=${CUDA_VISIBLE_DEVICES} | nproc_per_node=${nproc_per_node}"
   run_or_print "${cmd[@]}"
 }
