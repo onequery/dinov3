@@ -6,6 +6,7 @@
 - `h100/`
   - Canonical H100 launchers for the CAG content-state backbone scaling runs.
   - These scripts use the adopted single-H100 common recipe:
+    - `stage1/stage2/stage3 epochs=100/100/30`
     - `stage1 batch_per_gpu=72`
     - `stage2 batch_per_gpu=72`
     - `stage3 batch_per_gpu=24`

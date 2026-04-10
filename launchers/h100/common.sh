@@ -141,7 +141,7 @@ default_stage1_teacher_ckpt() {
 }
 
 default_stage2_teacher_ckpt() {
-  printf '%s\n' "$(stage_output_dir stage2)/eval/training_29999/teacher_checkpoint.pth"
+  printf '%s\n' "$(stage_output_dir stage2)/eval/training_99999/teacher_checkpoint.pth"
 }
 
 print_command() {
@@ -195,4 +195,3 @@ launch_h100_stage() {
   echo "    output_dir=${output_dir}"
   run_or_print "${cmd[@]}"
 }
-

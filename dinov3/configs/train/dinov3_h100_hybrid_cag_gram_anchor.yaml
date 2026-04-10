@@ -27,7 +27,7 @@ dino:
     start: 1
     peak: 1
     end: 0.5
-    warmup_epochs: 25
+    warmup_epochs: 83
     cosine_epochs: 1
 ibot:
   loss_weight: 1.0
@@ -52,7 +52,7 @@ gram:
   it_load_ema_teacher: -1
   rep_update: true
   update_frequency: 240
-  it_first_update: 25200
+  it_first_update: 83200
   max_updates: 3
   normalized: true
   img_level: true
@@ -65,7 +65,7 @@ gram:
     start: 0
     peak: 0
     end: 2.0
-    warmup_epochs: 25
+    warmup_epochs: 83
     cosine_epochs: 1
 train:
   batch_size_per_gpu: 16
@@ -134,7 +134,7 @@ hrft:
   enabled: false
   checkpoint_path: ""
 optim:
-  epochs: 30
+  epochs: 100
   optimizer: adamw
   weight_decay: null
   weight_decay_end: null
@@ -184,7 +184,7 @@ schedules:
     start: 0
     peak: 3.0e-05
     end: 3.0e-05
-    warmup_epochs: 2
+    warmup_epochs: 8
     freeze_last_layer_epochs: 0
   weight_decay:
     start: 0.04
@@ -195,7 +195,7 @@ schedules:
     start: 0.04
     peak: 0.07
     end: 0.07
-    warmup_epochs: 2
+    warmup_epochs: 8
   momentum:
     start: 0.999
     peak: 0.999
