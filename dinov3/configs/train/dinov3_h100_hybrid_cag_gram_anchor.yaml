@@ -176,7 +176,7 @@ crops:
     - 0.224
     - 0.225
 checkpointing:
-  period: 5000
+  period: 2500
   max_to_keep: 3
   keep_every: 50000
 schedules:

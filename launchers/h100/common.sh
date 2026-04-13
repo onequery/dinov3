@@ -182,12 +182,62 @@ require_file_unless_dry_run() {
   [[ -f "${path}" ]] || die "Required checkpoint not found: ${path}"
 }
 
+normalize_interrupted_checkpoints() {
+  local output_dir="$1"
+  local ckpt_root="${output_dir}/ckpt"
+  local ckpt_dir
+  local ckpt_name
+  local canonical_name
+  local canonical_path
+  local incomplete_path
+
+  [[ -d "${ckpt_root}" ]] || return 0
+
+  shopt -s nullglob
+  for ckpt_dir in "${ckpt_root}"/*; do
+    [[ -d "${ckpt_dir}" ]] || continue
+    ckpt_name="$(basename "${ckpt_dir}")"
+
+    # Normal checkpoints use pure integer directory names and must contain
+    # a complete distributed checkpoint payload, including .metadata.
+    if [[ "${ckpt_name}" =~ ^[0-9]+$ ]]; then
+      if [[ ! -f "${ckpt_dir}/.metadata" ]] && compgen -G "${ckpt_dir}/*.distcp" > /dev/null; then
+        incomplete_path="${ckpt_dir}.incomplete"
+        if [[ ! -e "${incomplete_path}" ]]; then
+          echo "    quarantining incomplete checkpoint ${ckpt_dir} -> ${incomplete_path}"
+          if [[ "${DRY_RUN}" != "1" ]]; then
+            mv "${ckpt_dir}" "${incomplete_path}"
+          fi
+        fi
+      fi
+      continue
+    fi
+
+    # Interrupted runs can leave a fully written distcp directory with a tempfile suffix
+    # such as "4999somt6kv0". Canonicalize it back to "4999" so resume can detect it.
+    if [[ "${ckpt_name}" =~ ^([0-9]+)[A-Za-z0-9._-]+$ ]] \
+      && [[ -f "${ckpt_dir}/.metadata" ]] \
+      && compgen -G "${ckpt_dir}/*.distcp" > /dev/null; then
+      canonical_name="${BASH_REMATCH[1]}"
+      canonical_path="${ckpt_root}/${canonical_name}"
+      if [[ ! -e "${canonical_path}" ]]; then
+        echo "    normalizing interrupted checkpoint ${ckpt_dir} -> ${canonical_path}"
+        if [[ "${DRY_RUN}" != "1" ]]; then
+          mv "${ckpt_dir}" "${canonical_path}"
+        fi
+      fi
+    fi
+  done
+  shopt -u nullglob
+}
+
 launch_h100_stage() {
   local stage="$1"
   shift
 
   local output_dir
   output_dir="$(stage_output_dir "${stage}")"
+  normalize_interrupted_checkpoints "${output_dir}"
   local nproc_per_node
   nproc_per_node="${NPROC_PER_NODE:-$(cuda_device_count)}"
   local -a launcher
