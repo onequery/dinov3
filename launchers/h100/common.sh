@@ -122,7 +122,7 @@ stage_batch_per_gpu() {
       printf '80\n'
       ;;
     stage2)
-      printf '72\n'
+      printf '80\n'
       ;;
     stage3)
       printf '28\n'

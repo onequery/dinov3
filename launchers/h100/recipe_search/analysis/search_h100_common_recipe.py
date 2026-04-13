@@ -52,7 +52,7 @@ STAGES = {
     "stage2": {
         "config": DINO_ROOT / "dinov3" / "configs" / "train" / "dinov3_h100_hybrid_cag_gram_anchor.yaml",
         "dataset": "CAGContrastFM3M:split=TRAIN:root={root}",
-        "candidates": [72, 68, 64, 56, 48, 32, 24, 16],
+        "candidates": [80, 76, 72, 68, 64, 56, 48, 32, 24, 16],
         "safe_batch": 16,
         "stability_iters": 50,
         "reference_epochs": 100,
@@ -70,7 +70,7 @@ STAGES = {
         / "train"
         / "dinov3_h100_hybrid_cag_high_res_adapt_content_state.yaml",
         "dataset": "CAGContrastFMContinuityV1:split=TRAIN:root={root}",
-        "candidates": [28, 24, 20, 16, 12, 8],
+        "candidates": [40, 36, 32, 28, 24, 20, 16, 12, 8],
         "safe_batch": 8,
         "stability_iters": 100,
         "base_lr_peak": 0.0,
@@ -717,6 +717,12 @@ def write_markdown(results: dict) -> None:
             "- Raw probe logs live under `outputs/h100_recipe_search/`.",
             "- Canonical H100 training launchers live under `dinov3/launchers/h100/`.",
             "- H100 recipe search scripts live under `dinov3/launchers/h100/recipe_search/`.",
+        ]
+    )
+    if results.get("reused_stage_results"):
+        lines.append(f"- Reused stage results: `{', '.join(results['reused_stage_results'])}`.")
+    lines.extend(
+        [
             "",
             "## Failed Candidates",
             "",
@@ -735,14 +741,23 @@ def write_markdown(results: dict) -> None:
     DOC_PATH.write_text("\n".join(lines) + "\n")
 
 
-def search_gpu_mode(gpu_mode: str, data_root: Path, results: dict) -> bool:
+def search_gpu_mode(
+    gpu_mode: str,
+    data_root: Path,
+    results: dict,
+    *,
+    stage_order: List[str],
+    preset_stage_results: Dict[str, dict] | None = None,
+) -> bool:
     fp8_candidates = [False, True]
     for fp8 in fp8_candidates:
         if gpu_mode == "single" and fp8:
             # Only use fp8 fallback after fp8=false failed single-GPU gating.
             pass
-        stage_results = {}
-        for stage in ("stage3", "stage2", "stage1"):
+        stage_results = dict(preset_stage_results or {})
+        for stage in stage_order:
+            if stage in stage_results:
+                continue
             recipe = find_stage_recipe(stage, gpu_mode, fp8, data_root, results)
             if recipe is None:
                 stage_results = {}
@@ -765,6 +780,26 @@ def main() -> int:
         default="auto",
         help="Search only the requested GPU mode, or try single then two when set to auto.",
     )
+    parser.add_argument(
+        "--search-stages",
+        nargs="+",
+        choices=("stage1", "stage2", "stage3"),
+        default=("stage3", "stage2", "stage1"),
+        help="Stages to actively search, in search order.",
+    )
+    parser.add_argument(
+        "--reuse-stage-results",
+        nargs="*",
+        choices=("stage1", "stage2", "stage3"),
+        default=(),
+        help="Reuse stage results from an existing results JSON instead of re-searching them.",
+    )
+    parser.add_argument(
+        "--reuse-results-from",
+        type=Path,
+        default=OUTPUT_ROOT / "results.json",
+        help="Results JSON used when --reuse-stage-results is provided.",
+    )
     args = parser.parse_args()
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -775,16 +810,49 @@ def main() -> int:
         "runs": [],
         "bootstrap_ckpts": {},
         "stage_results": {},
+        "reused_stage_results": [],
     }
     results["preflight"] = preflight(args.data_root)
+
+    preset_stage_results: Dict[str, dict] = {}
+    if args.reuse_stage_results:
+        if not args.reuse_results_from.exists():
+            raise FileNotFoundError(f"reuse results file not found: {args.reuse_results_from}")
+        previous = json.loads(args.reuse_results_from.read_text())
+        previous_stage_results = previous.get("stage_results", {})
+        for stage in args.reuse_stage_results:
+            if stage not in previous_stage_results:
+                raise ValueError(f"stage result {stage} not found in {args.reuse_results_from}")
+            preset_stage_results[stage] = previous_stage_results[stage]
+        results["stage_results"].update(preset_stage_results)
+        results["reused_stage_results"] = list(args.reuse_stage_results)
+
     write_results_json(results)
 
     if args.gpu_mode == "auto":
-        success = search_gpu_mode("single", args.data_root, results)
+        success = search_gpu_mode(
+            "single",
+            args.data_root,
+            results,
+            stage_order=list(args.search_stages),
+            preset_stage_results=preset_stage_results,
+        )
         if not success:
-            success = search_gpu_mode("two", args.data_root, results)
+            success = search_gpu_mode(
+                "two",
+                args.data_root,
+                results,
+                stage_order=list(args.search_stages),
+                preset_stage_results=preset_stage_results,
+            )
     else:
-        success = search_gpu_mode(args.gpu_mode, args.data_root, results)
+        success = search_gpu_mode(
+            args.gpu_mode,
+            args.data_root,
+            results,
+            stage_order=list(args.search_stages),
+            preset_stage_results=preset_stage_results,
+        )
 
     if not success:
         results["adopted_gpu_mode"] = "unresolved"

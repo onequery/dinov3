@@ -8,7 +8,7 @@
   - These scripts use the adopted 2-GPU H100 common recipe on `CUDA_VISIBLE_DEVICES=4,5`:
     - `stage1/stage2/stage3 epochs=100/100/30`
     - `stage1 batch_per_gpu=80`
-    - `stage2 batch_per_gpu=72`
+    - `stage2 batch_per_gpu=80`
     - `stage3 batch_per_gpu=28`
   - The launchers now default to `CUDA_VISIBLE_DEVICES=4,5` and infer `torchrun --nproc_per_node` from the visible GPU count.
   - Recipe-search utilities live under `h100/recipe_search/`.
