@@ -5,12 +5,12 @@
   - These scripts preserve the original dataset paths, checkpoint paths, and output layout.
 - `h100/`
   - Canonical H100 launchers for the CAG content-state backbone scaling runs.
-  - These scripts use the adopted 2-GPU H100 common recipe on `CUDA_VISIBLE_DEVICES=4,5`:
+  - These scripts use the adopted 2-GPU H100 common recipe on `CUDA_VISIBLE_DEVICES=0,1`:
     - `stage1/stage2/stage3 epochs=100/100/30`
     - `stage1 batch_per_gpu=80`
     - `stage2 batch_per_gpu=80`
     - `stage3 batch_per_gpu=28`
-  - The launchers now default to `CUDA_VISIBLE_DEVICES=4,5` and infer `torchrun --nproc_per_node` from the visible GPU count.
+  - The launchers now default to `CUDA_VISIBLE_DEVICES=0,1` and infer `torchrun --nproc_per_node` from the visible GPU count.
   - Recipe-search utilities live under `h100/recipe_search/`.
 - `../run_knn.sh`
   - Evaluation launcher.
@@ -38,7 +38,7 @@
 - `CONDA_ENV_NAME`
   - Defaults to `dinov3_stack`.
 - `CUDA_VISIBLE_DEVICES`
-  - Defaults to `4,5`.
+  - Defaults to `0,1`.
 - `NPROC_PER_NODE`
   - Optional override for distributed launch size.
   - By default, the H100 launcher infers this from `CUDA_VISIBLE_DEVICES`.

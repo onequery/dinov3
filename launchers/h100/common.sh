@@ -5,7 +5,7 @@ DINO_ROOT="$(cd "${COMMON_DIR}/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DINO_ROOT}/.." && pwd)"
 
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dinov3_stack}"
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4,5}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 DATA_ROOT="${DATA_ROOT:-/mnt/30TB_SSD/heesu/cag_vision_fm/images}"
 OUT_ROOT="${OUT_ROOT:-output/h100/1_pretrain}"
 TRAIN_NUM_WORKERS="${TRAIN_NUM_WORKERS:-8}"
