@@ -82,13 +82,13 @@ STAGES = {
 
 GPU_MODES = {
     "single": {
-        "gpu_ids": [0],
-        "cuda_visible_devices": "0",
+        "gpu_ids": [5],
+        "cuda_visible_devices": "5",
         "num_workers": 8,
     },
     "two": {
-        "gpu_ids": [0, 1],
-        "cuda_visible_devices": "0,1",
+        "gpu_ids": [5, 6],
+        "cuda_visible_devices": "5,6",
         "num_workers": 8,
     },
 }
