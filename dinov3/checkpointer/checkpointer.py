@@ -42,6 +42,13 @@ from torch.distributed.checkpoint.stateful import Stateful
 logger = logging.getLogger("dinov3")
 
 
+def _checkpoint_state_dict_options() -> dcpsd.StateDictOptions:
+    # Offload tensors to CPU before handing them to the filesystem writer.
+    # This avoids GPU->CPU staging inside the writer, which is brittle on
+    # some multi-GPU runtime stacks while preserving exact state recovery.
+    return dcpsd.StateDictOptions(cpu_offload=True)
+
+
 class CheckpointRetentionPolicy(Enum):
     ALL = "all"  # keep all checkpoints
     BEST = "best"
@@ -113,10 +120,11 @@ def save_checkpoint(
     torch.distributed.broadcast_object_list(ckpt_dir_tmp, src=src_rank, group=process_group)
     ckpt_dir_tmp = Path(ckpt_dir_tmp[0])
 
+    state_dict_options = _checkpoint_state_dict_options()
     to_save = {"iteration": iteration}
-    to_save["model"] = dcpsd.get_model_state_dict(model)
+    to_save["model"] = dcpsd.get_model_state_dict(model, options=state_dict_options)
     if optimizer is not None:
-        to_save["optimizer"] = dcpsd.get_optimizer_state_dict(model, optimizer)
+        to_save["optimizer"] = dcpsd.get_optimizer_state_dict(model, optimizer, options=state_dict_options)
     to_save.update(others)
     dcp.save(
         to_save,
@@ -147,10 +155,11 @@ def load_checkpoint(
     Activation checkpointing and torch-compile can also be different between save and load, no problem.
     """
     ckpt_dir = Path(ckpt_dir)
+    state_dict_options = _checkpoint_state_dict_options()
     to_load = {"iteration": None}
-    to_load["model"] = dcpsd.get_model_state_dict(model)
+    to_load["model"] = dcpsd.get_model_state_dict(model, options=state_dict_options)
     if optimizer is not None:
-        to_load["optimizer"] = dcpsd.get_optimizer_state_dict(model, optimizer)
+        to_load["optimizer"] = dcpsd.get_optimizer_state_dict(model, optimizer, options=state_dict_options)
     to_load.update(others)
     dcp.load(
         to_load,

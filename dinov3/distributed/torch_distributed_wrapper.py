@@ -258,10 +258,14 @@ def enable_distributed(
         nccl_async_error_handling=nccl_async_error_handling,
     )
 
+    current_device = None
     if set_cuda_current_device:
         torch.cuda.set_device(torch_env.local_rank)
+        current_device = torch.device(f"cuda:{torch_env.local_rank}")
 
-    dist.init_process_group(backend="nccl", timeout=timeout)
+    # Explicitly bind the NCCL process group to the local CUDA device so
+    # multi-GPU checkpoint collectives do not run with an "unknown" device map.
+    dist.init_process_group(backend="nccl", timeout=timeout, device_id=current_device)
     dist.barrier()
 
     if restrict_print_to_main_process:
