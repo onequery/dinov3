@@ -52,3 +52,19 @@
   - Set to `1` to print the resolved command instead of executing it.
 - `OMP_NUM_THREADS`
   - Defaults to `1`.
+- `ENABLE_DISTRIBUTED_DIAGNOSTICS`
+  - Defaults to `1`.
+  - When enabled, the launcher adds distributed/NCCL debug environment variables for postmortem diagnosis without changing the training recipe.
+- `TORCH_DISTRIBUTED_DEBUG_LEVEL`
+  - Defaults to `DETAIL`.
+- `NCCL_DEBUG_LEVEL`
+  - Defaults to `INFO`.
+- `NCCL_DEBUG_SUBSYS_LIST`
+  - Defaults to `INIT,COLL`.
+- `ENABLE_NCCL_DEBUG_FILE`
+  - Defaults to `1`.
+  - When enabled, NCCL writes per-process debug logs under each stage output `logs/` directory using `nccl.%h.%p.log`.
+- `TORCH_SHOW_CPP_STACKTRACES`
+  - Defaults to `1`.
+- `PYTHONFAULTHANDLER`
+  - Defaults to `1`.

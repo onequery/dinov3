@@ -12,6 +12,13 @@ TRAIN_NUM_WORKERS="${TRAIN_NUM_WORKERS:-8}"
 DRY_RUN="${DRY_RUN:-0}"
 MODELS="${MODELS:-vits vitb vitl}"
 OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+ENABLE_DISTRIBUTED_DIAGNOSTICS="${ENABLE_DISTRIBUTED_DIAGNOSTICS:-1}"
+TORCH_DISTRIBUTED_DEBUG_LEVEL="${TORCH_DISTRIBUTED_DEBUG_LEVEL:-DETAIL}"
+NCCL_DEBUG_LEVEL="${NCCL_DEBUG_LEVEL:-INFO}"
+NCCL_DEBUG_SUBSYS_LIST="${NCCL_DEBUG_SUBSYS_LIST:-INIT,COLL}"
+ENABLE_NCCL_DEBUG_FILE="${ENABLE_NCCL_DEBUG_FILE:-1}"
+TORCH_SHOW_CPP_STACKTRACES="${TORCH_SHOW_CPP_STACKTRACES:-1}"
+PYTHONFAULTHANDLER="${PYTHONFAULTHANDLER:-1}"
 
 die() {
   echo "Error: $*" >&2
@@ -237,6 +244,9 @@ launch_h100_stage() {
 
   local output_dir
   output_dir="$(stage_output_dir "${stage}")"
+  if [[ "${DRY_RUN}" != "1" ]]; then
+    mkdir -p "${output_dir}/logs"
+  fi
   normalize_interrupted_checkpoints "${output_dir}"
   local nproc_per_node
   nproc_per_node="${NPROC_PER_NODE:-$(cuda_device_count)}"
@@ -258,11 +268,27 @@ launch_h100_stage() {
     )
   fi
 
-  local -a cmd=(
-    env
+  local -a env_args=(
     "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
     "PYTHONPATH=${DINO_ROOT}"
     "OMP_NUM_THREADS=${OMP_NUM_THREADS}"
+  )
+  if [[ "${ENABLE_DISTRIBUTED_DIAGNOSTICS}" == "1" ]]; then
+    env_args+=(
+      "TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG_LEVEL}"
+      "NCCL_DEBUG=${NCCL_DEBUG_LEVEL}"
+      "NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS_LIST}"
+      "TORCH_SHOW_CPP_STACKTRACES=${TORCH_SHOW_CPP_STACKTRACES}"
+      "PYTHONFAULTHANDLER=${PYTHONFAULTHANDLER}"
+    )
+    if [[ "${ENABLE_NCCL_DEBUG_FILE}" == "1" ]]; then
+      env_args+=("NCCL_DEBUG_FILE=${output_dir}/logs/nccl.%h.%p.log")
+    fi
+  fi
+
+  local -a cmd=(
+    env
+    "${env_args[@]}"
     "${launcher[@]}"
     --config-file "$(stage_config_file "${stage}")"
     --output-dir "${output_dir}"
@@ -280,5 +306,11 @@ launch_h100_stage() {
   echo "==> ${stage} | ${MODEL_NAME}"
   echo "    output_dir=${output_dir}"
   echo "    cuda_visible_devices=${CUDA_VISIBLE_DEVICES} | nproc_per_node=${nproc_per_node}"
+  if [[ "${ENABLE_DISTRIBUTED_DIAGNOSTICS}" == "1" ]]; then
+    echo "    distributed diagnostics: TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG_LEVEL}, NCCL_DEBUG=${NCCL_DEBUG_LEVEL}, NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS_LIST}"
+    if [[ "${ENABLE_NCCL_DEBUG_FILE}" == "1" ]]; then
+      echo "    nccl debug files: ${output_dir}/logs/nccl.%h.%p.log"
+    fi
+  fi
   run_or_print "${cmd[@]}"
 }
