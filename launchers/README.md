@@ -68,3 +68,9 @@
   - Defaults to `1`.
 - `PYTHONFAULTHANDLER`
   - Defaults to `1`.
+
+## H100 Checkpoints
+
+- Exact training resume checkpoints are stored under each stage's `ckpt/<iteration>/` directory.
+- H100 multi-GPU launchers save eval teacher checkpoints as sharded directories named `sharded_teacher_checkpoint/`.
+- Stage2 and stage3 default checkpoint wiring expects those sharded eval directories rather than a single `teacher_checkpoint.pth` file.

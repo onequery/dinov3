@@ -214,7 +214,7 @@ def stage_overrides(
         f"train.dataset_path={spec['dataset'].format(root=data_root)}",
         f"train.batch_size_per_gpu={batch_per_gpu}",
         f"train.num_workers={num_workers}",
-        "train.sharded_eval_checkpoint=false",
+        "train.sharded_eval_checkpoint=true",
         f"student.arch={model.arch}",
         f"student.fp8_enabled={bool_str(fp8)}",
         "student.fp8_filter=blocks",
@@ -266,7 +266,7 @@ def make_output_dir(phase: str, gpu_mode: str, stage: str, model: str, suffix: s
 
 
 def teacher_ckpt(output_dir: Path) -> Path:
-    return output_dir / "eval" / "training_0" / "teacher_checkpoint.pth"
+    return output_dir / "eval" / "training_0" / "sharded_teacher_checkpoint"
 
 
 def classify_failure(stdout: str, stderr: str) -> str:

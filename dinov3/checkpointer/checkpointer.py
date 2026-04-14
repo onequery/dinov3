@@ -312,7 +312,12 @@ def init_fsdp_model_from_checkpoint(
             strict=strict,
         )
     else:  # DCP checkpoint
-        load_checkpoint(ckpt_dir=checkpoint_path, model=model, process_group=process_group)
+        load_checkpoint(
+            ckpt_dir=checkpoint_path,
+            model=model,
+            strict_loading=strict,
+            process_group=process_group,
+        )
 
 
 # Initialize a standard non distributed PyTorch model from PyTorch standard checkpoint for evals

@@ -161,11 +161,11 @@ stage_output_dir() {
 }
 
 default_stage1_teacher_ckpt() {
-  printf '%s\n' "$(stage_output_dir stage1)/eval/training_124999/teacher_checkpoint.pth"
+  printf '%s\n' "$(stage_output_dir stage1)/eval/training_124999/sharded_teacher_checkpoint"
 }
 
 default_stage2_teacher_ckpt() {
-  printf '%s\n' "$(stage_output_dir stage2)/eval/training_99999/teacher_checkpoint.pth"
+  printf '%s\n' "$(stage_output_dir stage2)/eval/training_99999/sharded_teacher_checkpoint"
 }
 
 print_command() {
@@ -186,7 +186,7 @@ require_file_unless_dry_run() {
   if [[ "${DRY_RUN}" == "1" ]]; then
     return 0
   fi
-  [[ -f "${path}" ]] || die "Required checkpoint not found: ${path}"
+  [[ -f "${path}" || -d "${path}" ]] || die "Required checkpoint not found: ${path}"
 }
 
 normalize_interrupted_checkpoints() {
@@ -295,7 +295,7 @@ launch_h100_stage() {
     "train.dataset_path=$(stage_dataset_path "${stage}")"
     "train.batch_size_per_gpu=$(stage_batch_per_gpu "${stage}")"
     "train.num_workers=${TRAIN_NUM_WORKERS}"
-    "train.sharded_eval_checkpoint=false"
+    "train.sharded_eval_checkpoint=true"
     "student.arch=${STUDENT_ARCH}"
     "student.fp8_enabled=false"
     "student.fp8_filter=blocks"
