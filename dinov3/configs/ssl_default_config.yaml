@@ -113,6 +113,7 @@ train:
   cudagraphs: false
   sharded_eval_checkpoint: false
   cache_dataset: false
+  pin_memory: true
 student:
   arch: vit_large
   patch_size: 16

@@ -214,6 +214,7 @@ def stage_overrides(
         f"train.dataset_path={spec['dataset'].format(root=data_root)}",
         f"train.batch_size_per_gpu={batch_per_gpu}",
         f"train.num_workers={num_workers}",
+        "train.pin_memory=false",
         "train.sharded_eval_checkpoint=true",
         f"student.arch={model.arch}",
         f"student.fp8_enabled={bool_str(fp8)}",

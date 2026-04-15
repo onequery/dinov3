@@ -356,6 +356,7 @@ def build_data_loader_from_cfg(
         dataset=dataset,
         batch_size=batch_size,
         num_workers=num_workers,
+        pin_memory=cfg.train.pin_memory,
         shuffle=True,
         seed=cfg.train.seed + start_iter + 1,
         sampler_type=sampler_type,

@@ -48,6 +48,9 @@
   - Defaults to `output/h100/1_pretrain`.
 - `TRAIN_NUM_WORKERS`
   - Defaults to `8`.
+- `TRAIN_PIN_MEMORY`
+  - Defaults to `false` for the H100 launchers.
+  - This changes only the DataLoader runtime path and is used to avoid pinned-memory crashes on the 2-GPU H100 setup.
 - `DRY_RUN`
   - Set to `1` to print the resolved command instead of executing it.
 - `OMP_NUM_THREADS`
