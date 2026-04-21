@@ -22,4 +22,5 @@ dist/
 # dataset*
 
 # exp
+/output
 output/
