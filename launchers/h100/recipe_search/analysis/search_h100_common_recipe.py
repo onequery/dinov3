@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 DINO_ROOT = REPO_ROOT / "dinov3"
 OUTPUT_ROOT = REPO_ROOT / "outputs" / "h100_recipe_search"
 DOC_PATH = REPO_ROOT / "docs" / "experiments" / "h100_common_recipe_search.md"
-DEFAULT_DATA_ROOT = Path("/mnt/30TB_SSD/heesu/cag_vision_fm/images")
+DEFAULT_DATA_ROOT = Path("/mnt/30TB_SSD/heesu/dataset/cag_vision_fm/images")
 
 
 @dataclass(frozen=True)
