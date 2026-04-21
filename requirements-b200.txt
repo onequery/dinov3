@@ -1,0 +1,20 @@
+# B200 / Blackwell sm_100 environment for DINOv3 pretraining.
+# Canonical environment: conda env `dinov3_stack`.
+# Install with:
+#   conda run -n dinov3_stack python -m pip install -r dinov3/requirements-b200.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu130
+
+torch==2.10.0+cu130
+torchvision==0.25.0+cu130
+torchaudio==2.10.0+cu130
+
+ftfy
+omegaconf
+regex
+scikit-learn
+submitit
+termcolor
+torchmetrics
+requests
+torchinfo
