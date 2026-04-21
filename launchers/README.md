@@ -43,7 +43,7 @@
   - Optional override for distributed launch size.
   - By default, the H100 launcher infers this from `CUDA_VISIBLE_DEVICES`.
 - `DATA_ROOT`
-  - Defaults to `/mnt/30TB_SSD/heesu/cag_vision_fm/images`.
+  - Defaults to `/mnt/30TB_SSD/heesu/dataset/cag_vision_fm/images`.
 - `OUT_ROOT`
   - Defaults to `output/h100/1_pretrain`.
 - `TRAIN_NUM_WORKERS`
