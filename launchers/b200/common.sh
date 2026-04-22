@@ -46,6 +46,9 @@ STAGE3_FP8="${STAGE3_FP8:-${TRAIN_FP8}}"
 STAGE1_COMPILE="${STAGE1_COMPILE:-${TRAIN_COMPILE}}"
 STAGE2_COMPILE="${STAGE2_COMPILE:-${TRAIN_COMPILE}}"
 STAGE3_COMPILE="${STAGE3_COMPILE:-${TRAIN_COMPILE}}"
+STAGE1_CHECKPOINTING_FULL="${STAGE1_CHECKPOINTING_FULL:-}"
+STAGE2_CHECKPOINTING_FULL="${STAGE2_CHECKPOINTING_FULL:-}"
+STAGE3_CHECKPOINTING_FULL="${STAGE3_CHECKPOINTING_FULL:-}"
 STAGE1_EPOCHS="${STAGE1_EPOCHS:-100}"
 STAGE2_EPOCHS="${STAGE2_EPOCHS:-100}"
 STAGE3_EPOCHS="${STAGE3_EPOCHS:-30}"
@@ -224,6 +227,16 @@ stage_compile() {
     stage1) printf '%s\n' "${STAGE1_COMPILE}" ;;
     stage2) printf '%s\n' "${STAGE2_COMPILE}" ;;
     stage3) printf '%s\n' "${STAGE3_COMPILE}" ;;
+    *) die "Unknown stage: ${stage}" ;;
+  esac
+}
+
+stage_checkpointing_full() {
+  local stage="$1"
+  case "${stage}" in
+    stage1) printf '%s\n' "${STAGE1_CHECKPOINTING_FULL}" ;;
+    stage2) printf '%s\n' "${STAGE2_CHECKPOINTING_FULL}" ;;
+    stage3) printf '%s\n' "${STAGE3_CHECKPOINTING_FULL}" ;;
     *) die "Unknown stage: ${stage}" ;;
   esac
 }
@@ -442,12 +455,20 @@ launch_b200_stage() {
     "student.fp8_enabled=$(bool_value "$(stage_fp8 "${stage}")")"
     "student.fp8_filter=blocks"
   )
+  local checkpointing_full
+  checkpointing_full="$(stage_checkpointing_full "${stage}")"
+  if [[ -n "${checkpointing_full}" ]]; then
+    cmd+=("train.checkpointing_full=$(bool_value "${checkpointing_full}")")
+  fi
   cmd+=("$@")
 
   echo "==> ${stage} | ${MODEL_NAME}"
   echo "    output_dir=${output_dir}"
   echo "    cuda_visible_devices=${CUDA_VISIBLE_DEVICES} | nproc_per_node=${nproc_per_node}"
   echo "    batch_per_gpu=$(stage_batch_per_gpu "${stage}") | workers=$(stage_num_workers "${stage}") | fp8=$(bool_value "$(stage_fp8 "${stage}")") | compile=$(bool_value "$(stage_compile "${stage}")") | pin_memory=$(bool_value "$(stage_pin_memory "${stage}")")"
+  if [[ -n "${checkpointing_full}" ]]; then
+    echo "    checkpointing_full=$(bool_value "${checkpointing_full}")"
+  fi
   echo "    epochs=$(stage_epochs "${stage}") | epoch_length=$(stage_epoch_length "${stage}") | final_eval=training_$(stage_final_iteration "${stage}")"
   if [[ "${ENABLE_DISTRIBUTED_DIAGNOSTICS}" == "1" ]]; then
     echo "    distributed diagnostics: TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG_LEVEL}, NCCL_DEBUG=${NCCL_DEBUG_LEVEL}, NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS_LIST}"

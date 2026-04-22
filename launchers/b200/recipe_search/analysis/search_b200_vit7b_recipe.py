@@ -100,6 +100,7 @@ class Recipe:
     iter_time_sec: float | None
     max_memory_mib: int | None
     mean_gpu_util: float | None
+    checkpointing_full: bool | None = None
 
 
 def bool_str(value: bool) -> str:
@@ -291,6 +292,7 @@ def build_overrides(
     pin_memory: bool,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     lr_scale: float,
     epochs: int,
     epoch_length: int,
@@ -322,6 +324,8 @@ def build_overrides(
         "schedules.teacher_temp.warmup_epochs=0",
         "schedules.weight_decay.warmup_epochs=0",
     ]
+    if checkpointing_full is not None:
+        overrides.append(f"train.checkpointing_full={bool_str(checkpointing_full)}")
     if prereq_ckpt is not None:
         overrides.extend(
             [
@@ -377,6 +381,7 @@ def run_train(
     pin_memory: bool,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     lr_scale: float,
     iters: int,
     eval_period: int,
@@ -397,6 +402,7 @@ def run_train(
         pin_memory=pin_memory,
         fp8=fp8,
         compile_enabled=compile_enabled,
+        checkpointing_full=checkpointing_full,
         lr_scale=lr_scale,
         epochs=1,
         epoch_length=iters,
@@ -482,6 +488,7 @@ def run_train(
         "pin_memory": pin_memory,
         "fp8": fp8,
         "compile": compile_enabled,
+        "checkpointing_full": checkpointing_full,
         "lr_scale": lr_scale,
         "iters": iters,
         "eval_period": eval_period,
@@ -544,6 +551,7 @@ def find_recorded_run(
     pin_memory: bool,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     lr_scale: float,
     iters: int,
 ) -> dict[str, Any] | None:
@@ -559,6 +567,10 @@ def find_recorded_run(
         if bool(run.get("pin_memory")) != pin_memory:
             continue
         if bool(run.get("fp8")) != fp8 or bool(run.get("compile")) != compile_enabled:
+            continue
+        if checkpointing_full is not None and bool(run.get("checkpointing_full")) != checkpointing_full:
+            continue
+        if checkpointing_full is None and run.get("checkpointing_full") is not None:
             continue
         if int(run.get("iters", -1)) != iters:
             continue
@@ -597,10 +609,12 @@ def test_batch(
     pin_memory: bool,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     fit_iters: int,
     results: dict[str, Any],
 ) -> dict[str, Any]:
-    suffix = f"b{batch}_w{num_workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}"
+    ckpt_suffix = "" if checkpointing_full is None else f"_ckptfull{int(checkpointing_full)}"
+    suffix = f"b{batch}_w{num_workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}{ckpt_suffix}"
     recorded = find_recorded_run(
         results,
         stage=stage,
@@ -611,6 +625,7 @@ def test_batch(
         pin_memory=pin_memory,
         fp8=fp8,
         compile_enabled=compile_enabled,
+        checkpointing_full=checkpointing_full,
         lr_scale=1.0,
         iters=fit_iters,
     )
@@ -629,6 +644,7 @@ def test_batch(
         pin_memory=pin_memory,
         fp8=fp8,
         compile_enabled=compile_enabled,
+        checkpointing_full=checkpointing_full,
         lr_scale=1.0,
         iters=fit_iters,
         eval_period=0,
@@ -652,6 +668,7 @@ def find_max_batch(
     pin_memory: bool,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     fit_iters: int,
     max_batch_per_gpu: int,
     results: dict[str, Any],
@@ -671,6 +688,7 @@ def find_max_batch(
         pin_memory=pin_memory,
         fp8=fp8,
         compile_enabled=compile_enabled,
+        checkpointing_full=checkpointing_full,
         fit_iters=fit_iters,
         results=results,
     )
@@ -691,6 +709,7 @@ def find_max_batch(
                 pin_memory=pin_memory,
                 fp8=fp8,
                 compile_enabled=compile_enabled,
+                checkpointing_full=checkpointing_full,
                 fit_iters=fit_iters,
                 results=results,
             )
@@ -720,6 +739,7 @@ def find_max_batch(
                 pin_memory=pin_memory,
                 fp8=fp8,
                 compile_enabled=compile_enabled,
+                checkpointing_full=checkpointing_full,
                 fit_iters=fit_iters,
                 results=results,
             )
@@ -755,6 +775,7 @@ def find_max_batch(
             pin_memory=pin_memory,
             fp8=fp8,
             compile_enabled=compile_enabled,
+            checkpointing_full=checkpointing_full,
             fit_iters=fit_iters,
             results=results,
         )
@@ -785,6 +806,7 @@ def benchmark_io_and_mode(
     batch: int,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     max_workers: int,
     benchmark_iters: int,
     warmup_records: int,
@@ -794,7 +816,8 @@ def benchmark_io_and_mode(
     worker0_ooms = 0
     for workers in worker_candidates(max_workers):
         for pin_memory in (False, True):
-            suffix = f"b{batch}_w{workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}"
+            ckpt_suffix = "" if checkpointing_full is None else f"_ckptfull{int(checkpointing_full)}"
+            suffix = f"b{batch}_w{workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}{ckpt_suffix}"
             run = find_recorded_run(
                 results,
                 stage=stage,
@@ -805,6 +828,7 @@ def benchmark_io_and_mode(
                 pin_memory=pin_memory,
                 fp8=fp8,
                 compile_enabled=compile_enabled,
+                checkpointing_full=checkpointing_full,
                 lr_scale=1.0,
                 iters=benchmark_iters,
             )
@@ -824,6 +848,7 @@ def benchmark_io_and_mode(
                     pin_memory=pin_memory,
                     fp8=fp8,
                     compile_enabled=compile_enabled,
+                    checkpointing_full=checkpointing_full,
                     lr_scale=1.0,
                     iters=benchmark_iters,
                     eval_period=0,
@@ -867,9 +892,12 @@ def stabilize(
         if stage.even_batch:
             batch = batch - (batch % 2)
         for lr_scale in lr_scales:
+            ckpt_suffix = ""
+            if base_run.get("checkpointing_full") is not None:
+                ckpt_suffix = f"_ckptfull{int(bool(base_run['checkpointing_full']))}"
             suffix = (
                 f"b{batch}_w{base_run['num_workers']}_pin{int(base_run['pin_memory'])}"
-                f"_fp8{int(base_run['fp8'])}_compile{int(base_run['compile'])}_lr{lr_scale}"
+                f"_fp8{int(base_run['fp8'])}_compile{int(base_run['compile'])}{ckpt_suffix}_lr{lr_scale}"
             )
             run = find_recorded_run(
                 results,
@@ -881,6 +909,7 @@ def stabilize(
                 pin_memory=bool(base_run["pin_memory"]),
                 fp8=bool(base_run["fp8"]),
                 compile_enabled=bool(base_run["compile"]),
+                checkpointing_full=base_run.get("checkpointing_full"),
                 lr_scale=lr_scale,
                 iters=stability_iters,
             )
@@ -900,6 +929,7 @@ def stabilize(
                     pin_memory=bool(base_run["pin_memory"]),
                     fp8=bool(base_run["fp8"]),
                     compile_enabled=bool(base_run["compile"]),
+                    checkpointing_full=base_run.get("checkpointing_full"),
                     lr_scale=lr_scale,
                     iters=stability_iters,
                     eval_period=0,
@@ -943,6 +973,7 @@ def create_bootstrap_ckpt(
         pin_memory=False,
         fp8=recipe.fp8,
         compile_enabled=False,
+        checkpointing_full=recipe.checkpointing_full,
         lr_scale=recipe.lr_scale,
         iters=1,
         eval_period=1,
@@ -968,6 +999,7 @@ def benchmark_with_batch_backoff(
     start_batch: int,
     fp8: bool,
     compile_enabled: bool,
+    checkpointing_full: bool | None,
     max_workers: int,
     benchmark_iters: int,
     warmup_records: int,
@@ -988,6 +1020,7 @@ def benchmark_with_batch_backoff(
                 batch=batch,
                 fp8=fp8,
                 compile_enabled=compile_enabled,
+                checkpointing_full=checkpointing_full,
                 max_workers=max_workers,
                 benchmark_iters=benchmark_iters,
                 warmup_records=warmup_records,
@@ -1000,6 +1033,7 @@ def benchmark_with_batch_backoff(
                 "batch_per_gpu": batch,
                 "fp8": fp8,
                 "compile": compile_enabled,
+                "checkpointing_full": checkpointing_full,
                 "reason": str(exc),
             }
             results.setdefault("benchmark_backoffs", []).append(failure)
@@ -1060,91 +1094,103 @@ def search_stage(
     max_batch_per_gpu: int,
     results: dict[str, Any],
 ) -> Recipe:
-    mode_candidates = [
+    precision_compile_modes = [
         (True, True),
         (True, False),
         (False, True),
         (False, False),
     ]
+    checkpointing_full_candidates: list[bool | None] = [False, True] if stage.name == "stage1" else [None]
     mode_failures: list[dict[str, Any]] = []
-    for fp8, compile_enabled in mode_candidates:
-        batch, run = find_max_batch(
-            stage=stage,
-            data_root=data_root,
-            output_root=output_root,
-            cuda_visible_devices=cuda_visible_devices,
-            nproc_per_node=nproc_per_node,
-            prereq_ckpt=prereq_ckpt,
-            num_workers=initial_workers,
-            pin_memory=False,
-            fp8=fp8,
-            compile_enabled=compile_enabled,
-            fit_iters=fit_iters,
-            max_batch_per_gpu=max_batch_per_gpu,
-            results=results,
-        )
-        if batch is None or run is None:
-            mode_failures.append(
-                {
+    for fp8, compile_enabled in precision_compile_modes:
+        stable_recipes: list[Recipe] = []
+        for checkpointing_full in checkpointing_full_candidates:
+            batch, run = find_max_batch(
+                stage=stage,
+                data_root=data_root,
+                output_root=output_root,
+                cuda_visible_devices=cuda_visible_devices,
+                nproc_per_node=nproc_per_node,
+                prereq_ckpt=prereq_ckpt,
+                num_workers=initial_workers,
+                pin_memory=False,
+                fp8=fp8,
+                compile_enabled=compile_enabled,
+                checkpointing_full=checkpointing_full,
+                fit_iters=fit_iters,
+                max_batch_per_gpu=max_batch_per_gpu,
+                results=results,
+            )
+            if batch is None or run is None:
+                mode_failures.append(
+                    {
+                        "stage": stage.name,
+                        "fp8": fp8,
+                        "compile": compile_enabled,
+                        "checkpointing_full": checkpointing_full,
+                        "reason": "no_fitting_batch",
+                    }
+                )
+                continue
+            try:
+                benchmark = benchmark_with_batch_backoff(
+                    stage=stage,
+                    data_root=data_root,
+                    output_root=output_root,
+                    cuda_visible_devices=cuda_visible_devices,
+                    nproc_per_node=nproc_per_node,
+                    prereq_ckpt=prereq_ckpt,
+                    start_batch=int(run["batch_per_gpu"]),
+                    fp8=bool(run["fp8"]),
+                    compile_enabled=bool(run["compile"]),
+                    checkpointing_full=run.get("checkpointing_full"),
+                    max_workers=max_workers,
+                    benchmark_iters=benchmark_iters,
+                    warmup_records=warmup_records,
+                    results=results,
+                )
+                stable = stabilize(
+                    stage=stage,
+                    data_root=data_root,
+                    output_root=output_root,
+                    cuda_visible_devices=cuda_visible_devices,
+                    nproc_per_node=nproc_per_node,
+                    prereq_ckpt=prereq_ckpt,
+                    base_run=benchmark,
+                    stability_iters=stability_iters,
+                    warmup_records=warmup_records,
+                    results=results,
+                )
+            except RuntimeError as exc:
+                failure = {
                     "stage": stage.name,
                     "fp8": fp8,
                     "compile": compile_enabled,
-                    "reason": "no_fitting_batch",
+                    "checkpointing_full": checkpointing_full,
+                    "reason": str(exc),
                 }
+                mode_failures.append(failure)
+                results.setdefault("mode_failures", []).append(failure)
+                write_json(results, output_root)
+                continue
+            stable_recipes.append(
+                Recipe(
+                    stage=stage.name,
+                    batch_per_gpu=int(stable["batch_per_gpu"]),
+                    num_workers=int(stable["num_workers"]),
+                    pin_memory=bool(stable["pin_memory"]),
+                    fp8=bool(stable["fp8"]),
+                    compile=bool(stable["compile"]),
+                    lr_scale=float(stable["lr_scale"]),
+                    throughput_images_per_sec=stable.get("throughput_images_per_sec"),
+                    iter_time_sec=stable.get("iter_time_sec"),
+                    max_memory_mib=stable.get("max_memory_mib"),
+                    mean_gpu_util=stable.get("mean_gpu_util"),
+                    checkpointing_full=stable.get("checkpointing_full"),
+                )
             )
-            continue
-        try:
-            benchmark = benchmark_with_batch_backoff(
-                stage=stage,
-                data_root=data_root,
-                output_root=output_root,
-                cuda_visible_devices=cuda_visible_devices,
-                nproc_per_node=nproc_per_node,
-                prereq_ckpt=prereq_ckpt,
-                start_batch=int(run["batch_per_gpu"]),
-                fp8=bool(run["fp8"]),
-                compile_enabled=bool(run["compile"]),
-                max_workers=max_workers,
-                benchmark_iters=benchmark_iters,
-                warmup_records=warmup_records,
-                results=results,
-            )
-            stable = stabilize(
-                stage=stage,
-                data_root=data_root,
-                output_root=output_root,
-                cuda_visible_devices=cuda_visible_devices,
-                nproc_per_node=nproc_per_node,
-                prereq_ckpt=prereq_ckpt,
-                base_run=benchmark,
-                stability_iters=stability_iters,
-                warmup_records=warmup_records,
-                results=results,
-            )
-        except RuntimeError as exc:
-            failure = {
-                "stage": stage.name,
-                "fp8": fp8,
-                "compile": compile_enabled,
-                "reason": str(exc),
-            }
-            mode_failures.append(failure)
-            results.setdefault("mode_failures", []).append(failure)
-            write_json(results, output_root)
-            continue
-        return Recipe(
-            stage=stage.name,
-            batch_per_gpu=int(stable["batch_per_gpu"]),
-            num_workers=int(stable["num_workers"]),
-            pin_memory=bool(stable["pin_memory"]),
-            fp8=bool(stable["fp8"]),
-            compile=bool(stable["compile"]),
-            lr_scale=float(stable["lr_scale"]),
-            throughput_images_per_sec=stable.get("throughput_images_per_sec"),
-            iter_time_sec=stable.get("iter_time_sec"),
-            max_memory_mib=stable.get("max_memory_mib"),
-            mean_gpu_util=stable.get("mean_gpu_util"),
-        )
+        if stable_recipes:
+            return max(stable_recipes, key=lambda recipe: recipe.throughput_images_per_sec or 0)
     raise RuntimeError(f"No stable recipe found for {stage.name}: {mode_failures}")
 
 
@@ -1167,6 +1213,8 @@ def write_recipe_env(recipes: dict[str, Recipe], path: Path) -> None:
                 f"{prefix}_COMPILE={bool_str(recipe.compile)}",
             ]
         )
+        if recipe.checkpointing_full is not None:
+            lines.append(f"{prefix}_CHECKPOINTING_FULL={bool_str(recipe.checkpointing_full)}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
 
@@ -1191,17 +1239,17 @@ def write_markdown(results: dict[str, Any], recipes: dict[str, Recipe], doc_path
         "",
         "## Selected Recipes",
         "",
-        "| Stage | Batch/GPU | Global Batch | Workers | Pin Memory | FP8 | Compile | LR Scale | Images/s | Iter Time | Max Mem MiB | Mean GPU Util |",
-        "| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Stage | Batch/GPU | Global Batch | Workers | Pin Memory | FP8 | Compile | Checkpointing Full | LR Scale | Images/s | Iter Time | Max Mem MiB | Mean GPU Util |",
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for stage in ("stage1", "stage2", "stage3"):
         recipe = recipes.get(stage)
         if recipe is None:
-            lines.append(f"| {stage} | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved |")
+            lines.append(f"| {stage} | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved | unresolved |")
             continue
         global_batch = recipe.batch_per_gpu * int(results["preflight"]["nproc_per_node"])
         lines.append(
-            "| {stage} | {batch} | {global_batch} | {workers} | {pin} | {fp8} | {compile} | {lr_scale:.3g} | {ips} | {iter_time} | {mem} | {util} |".format(
+            "| {stage} | {batch} | {global_batch} | {workers} | {pin} | {fp8} | {compile} | {checkpointing_full} | {lr_scale:.3g} | {ips} | {iter_time} | {mem} | {util} |".format(
                 stage=stage,
                 batch=recipe.batch_per_gpu,
                 global_batch=global_batch,
@@ -1209,6 +1257,7 @@ def write_markdown(results: dict[str, Any], recipes: dict[str, Recipe], doc_path
                 pin=recipe.pin_memory,
                 fp8=recipe.fp8,
                 compile=recipe.compile,
+                checkpointing_full=recipe.checkpointing_full if recipe.checkpointing_full is not None else "config",
                 lr_scale=recipe.lr_scale,
                 ips=f"{recipe.throughput_images_per_sec:.3f}" if recipe.throughput_images_per_sec else "n/a",
                 iter_time=f"{recipe.iter_time_sec:.3f}" if recipe.iter_time_sec else "n/a",
@@ -1263,6 +1312,20 @@ def main() -> int:
     parser.add_argument("--max-batch-per-gpu", type=int, default=512)
     parser.add_argument("--resume-results", action="store_true", help="Resume from an existing results.json in the output root.")
     args = parser.parse_args()
+
+    args.data_root = args.data_root.expanduser().resolve()
+    if not args.output_root.is_absolute():
+        args.output_root = (REPO_ROOT / args.output_root).resolve()
+    else:
+        args.output_root = args.output_root.expanduser().resolve()
+    if not args.doc_path.is_absolute():
+        args.doc_path = (REPO_ROOT / args.doc_path).resolve()
+    else:
+        args.doc_path = args.doc_path.expanduser().resolve()
+    if not args.recipe_env_path.is_absolute():
+        args.recipe_env_path = (REPO_ROOT / args.recipe_env_path).resolve()
+    else:
+        args.recipe_env_path = args.recipe_env_path.expanduser().resolve()
 
     cpu_count = os.cpu_count() or 8
     inferred_max_workers = max(1, min(8, cpu_count // max(1, args.nproc_per_node)))
