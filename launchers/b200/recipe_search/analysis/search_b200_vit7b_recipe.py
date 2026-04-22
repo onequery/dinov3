@@ -840,6 +840,56 @@ def create_bootstrap_ckpt(
     return ckpt
 
 
+def benchmark_with_batch_backoff(
+    *,
+    stage: StageSpec,
+    data_root: Path,
+    output_root: Path,
+    cuda_visible_devices: str,
+    nproc_per_node: int,
+    prereq_ckpt: Path | None,
+    start_batch: int,
+    fp8: bool,
+    compile_enabled: bool,
+    max_workers: int,
+    benchmark_iters: int,
+    warmup_records: int,
+    results: dict[str, Any],
+) -> dict[str, Any]:
+    step = 2 if stage.even_batch else 1
+    batch = normalize_batch(start_batch, even=stage.even_batch, min_batch=stage.min_batch)
+    while batch >= stage.min_batch:
+        try:
+            return benchmark_io_and_mode(
+                stage=stage,
+                data_root=data_root,
+                output_root=output_root,
+                cuda_visible_devices=cuda_visible_devices,
+                nproc_per_node=nproc_per_node,
+                prereq_ckpt=prereq_ckpt,
+                batch=batch,
+                fp8=fp8,
+                compile_enabled=compile_enabled,
+                max_workers=max_workers,
+                benchmark_iters=benchmark_iters,
+                warmup_records=warmup_records,
+                results=results,
+            )
+        except RuntimeError as exc:
+            failure = {
+                "stage": stage.name,
+                "phase": "benchmark_backoff",
+                "batch_per_gpu": batch,
+                "fp8": fp8,
+                "compile": compile_enabled,
+                "reason": str(exc),
+            }
+            results.setdefault("benchmark_backoffs", []).append(failure)
+            write_json(results, output_root)
+            batch -= step
+    raise RuntimeError(f"No successful worker/pin benchmark for {stage.name} at or below batch={start_batch}")
+
+
 def search_stage(
     *,
     stage: StageSpec,
@@ -891,14 +941,14 @@ def search_stage(
             )
             continue
         try:
-            benchmark = benchmark_io_and_mode(
+            benchmark = benchmark_with_batch_backoff(
                 stage=stage,
                 data_root=data_root,
                 output_root=output_root,
                 cuda_visible_devices=cuda_visible_devices,
                 nproc_per_node=nproc_per_node,
                 prereq_ckpt=prereq_ckpt,
-                batch=int(run["batch_per_gpu"]),
+                start_batch=int(run["batch_per_gpu"]),
                 fp8=bool(run["fp8"]),
                 compile_enabled=bool(run["compile"]),
                 max_workers=max_workers,

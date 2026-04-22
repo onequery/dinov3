@@ -11,6 +11,8 @@ if [[ -f "${RECIPE_ENV}" ]]; then
 fi
 
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dinov3_stack}"
+CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX:-/home/gmail_asse/anaconda3/envs/${CONDA_ENV_NAME}}"
+PYTHON_BIN="${PYTHON_BIN:-${CONDA_ENV_PREFIX}/bin/python}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 DATA_ROOT="${DATA_ROOT:-/NHNHOME/WORKSPACE/0526040018_A/heesu/cag_vision_fm/images}"
 OUT_ROOT="${OUT_ROOT:-output/b200/1_pretrain}"
@@ -372,11 +374,15 @@ launch_b200_stage() {
 
   local nproc_per_node
   nproc_per_node="${NPROC_PER_NODE:-$(cuda_device_count)}"
+  if [[ ! -x "${PYTHON_BIN}" ]]; then
+    die "PYTHON_BIN is not executable: ${PYTHON_BIN}"
+  fi
   local -a launcher
   if [[ "${nproc_per_node}" -gt 1 ]]; then
     launcher=(
-      conda run -n "${CONDA_ENV_NAME}"
-      torchrun
+      "${PYTHON_BIN}"
+      -m
+      torch.distributed.run
       --standalone
       --nproc_per_node="${nproc_per_node}"
       -m
@@ -384,9 +390,9 @@ launch_b200_stage() {
     )
   else
     launcher=(
-      conda run -n "${CONDA_ENV_NAME}"
-      python
-      dinov3/train/train.py
+      "${PYTHON_BIN}"
+      -m
+      dinov3.train.train
     )
   fi
 
