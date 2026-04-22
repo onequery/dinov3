@@ -508,6 +508,13 @@ def normalize_batch(value: int, *, even: bool, min_batch: int) -> int:
     return next_even(value) if even else value
 
 
+def normalize_batch_down(value: int, *, even: bool, min_batch: int) -> int:
+    value = max(value, min_batch)
+    if even and value % 2:
+        value -= 1
+    return max(value, min_batch)
+
+
 def record(results: dict[str, Any], run: dict[str, Any], output_root: Path) -> None:
     results["runs"].append(run)
     write_json(results, output_root)
@@ -517,6 +524,58 @@ def record(results: dict[str, Any], run: dict[str, Any], output_root: Path) -> N
         "ips={throughput_images_per_sec}".format(**run),
         flush=True,
     )
+
+
+def same_float(left: Any, right: float) -> bool:
+    try:
+        return math.isclose(float(left), float(right), rel_tol=0.0, abs_tol=1e-12)
+    except (TypeError, ValueError):
+        return False
+
+
+def find_recorded_run(
+    results: dict[str, Any],
+    *,
+    stage: StageSpec,
+    phase: str,
+    suffix: str,
+    batch_per_gpu: int,
+    num_workers: int,
+    pin_memory: bool,
+    fp8: bool,
+    compile_enabled: bool,
+    lr_scale: float,
+    iters: int,
+) -> dict[str, Any] | None:
+    for run in reversed(results.get("runs", [])):
+        if run.get("stage") != stage.name:
+            continue
+        if run.get("phase") != phase or run.get("suffix") != suffix:
+            continue
+        if int(run.get("batch_per_gpu", -1)) != batch_per_gpu:
+            continue
+        if int(run.get("num_workers", -1)) != num_workers:
+            continue
+        if bool(run.get("pin_memory")) != pin_memory:
+            continue
+        if bool(run.get("fp8")) != fp8 or bool(run.get("compile")) != compile_enabled:
+            continue
+        if int(run.get("iters", -1)) != iters:
+            continue
+        if not same_float(run.get("lr_scale"), lr_scale):
+            continue
+        return run
+    return None
+
+
+def reuse_recorded_run(run: dict[str, Any]) -> dict[str, Any]:
+    print(
+        "[{stage}] {phase}/{suffix}: reuse status={status}, batch={batch_per_gpu}, "
+        "workers={num_workers}, pin={pin_memory}, fp8={fp8}, compile={compile}, "
+        "ips={throughput_images_per_sec}".format(**run),
+        flush=True,
+    )
+    return run
 
 
 def write_json(results: dict[str, Any], output_root: Path) -> None:
@@ -541,12 +600,28 @@ def test_batch(
     fit_iters: int,
     results: dict[str, Any],
 ) -> dict[str, Any]:
+    suffix = f"b{batch}_w{num_workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}"
+    recorded = find_recorded_run(
+        results,
+        stage=stage,
+        phase="fit",
+        suffix=suffix,
+        batch_per_gpu=batch,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        fp8=fp8,
+        compile_enabled=compile_enabled,
+        lr_scale=1.0,
+        iters=fit_iters,
+    )
+    if recorded is not None:
+        return reuse_recorded_run(recorded)
     run = run_train(
         stage=stage,
         data_root=data_root,
         output_root=output_root,
         phase="fit",
-        suffix=f"b{batch}_w{num_workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}",
+        suffix=suffix,
         cuda_visible_devices=cuda_visible_devices,
         nproc_per_node=nproc_per_node,
         batch_per_gpu=batch,
@@ -716,16 +791,15 @@ def benchmark_io_and_mode(
     results: dict[str, Any],
 ) -> dict[str, Any]:
     best: dict[str, Any] | None = None
+    worker0_ooms = 0
     for workers in worker_candidates(max_workers):
         for pin_memory in (False, True):
-            run = run_train(
+            suffix = f"b{batch}_w{workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}"
+            run = find_recorded_run(
+                results,
                 stage=stage,
-                data_root=data_root,
-                output_root=output_root,
                 phase="benchmark",
-                suffix=f"b{batch}_w{workers}_pin{int(pin_memory)}_fp8{int(fp8)}_compile{int(compile_enabled)}",
-                cuda_visible_devices=cuda_visible_devices,
-                nproc_per_node=nproc_per_node,
+                suffix=suffix,
                 batch_per_gpu=batch,
                 num_workers=workers,
                 pin_memory=pin_memory,
@@ -733,13 +807,39 @@ def benchmark_io_and_mode(
                 compile_enabled=compile_enabled,
                 lr_scale=1.0,
                 iters=benchmark_iters,
-                eval_period=0,
-                checkpoint_period=1000000000,
-                prereq_ckpt=prereq_ckpt,
-                warmup_records=warmup_records,
             )
-            record(results, run, output_root)
+            if run is not None:
+                run = reuse_recorded_run(run)
+            else:
+                run = run_train(
+                    stage=stage,
+                    data_root=data_root,
+                    output_root=output_root,
+                    phase="benchmark",
+                    suffix=suffix,
+                    cuda_visible_devices=cuda_visible_devices,
+                    nproc_per_node=nproc_per_node,
+                    batch_per_gpu=batch,
+                    num_workers=workers,
+                    pin_memory=pin_memory,
+                    fp8=fp8,
+                    compile_enabled=compile_enabled,
+                    lr_scale=1.0,
+                    iters=benchmark_iters,
+                    eval_period=0,
+                    checkpoint_period=1000000000,
+                    prereq_ckpt=prereq_ckpt,
+                    warmup_records=warmup_records,
+                )
+                record(results, run, output_root)
+            if workers == 0 and run["status"] == "oom":
+                worker0_ooms += 1
             if not is_success(run):
+                if workers == 0 and pin_memory and worker0_ooms == 2:
+                    raise RuntimeError(
+                        f"No successful worker/pin benchmark for {stage.name} batch={batch}; "
+                        "worker=0 pin false/true both OOM, treating batch as GPU-memory bound"
+                    )
                 continue
             if best is None or (run.get("throughput_images_per_sec") or 0) > (best.get("throughput_images_per_sec") or 0):
                 best = run
@@ -767,17 +867,15 @@ def stabilize(
         if stage.even_batch:
             batch = batch - (batch % 2)
         for lr_scale in lr_scales:
-            run = run_train(
+            suffix = (
+                f"b{batch}_w{base_run['num_workers']}_pin{int(base_run['pin_memory'])}"
+                f"_fp8{int(base_run['fp8'])}_compile{int(base_run['compile'])}_lr{lr_scale}"
+            )
+            run = find_recorded_run(
+                results,
                 stage=stage,
-                data_root=data_root,
-                output_root=output_root,
                 phase="stability",
-                suffix=(
-                    f"b{batch}_w{base_run['num_workers']}_pin{int(base_run['pin_memory'])}"
-                    f"_fp8{int(base_run['fp8'])}_compile{int(base_run['compile'])}_lr{lr_scale}"
-                ),
-                cuda_visible_devices=cuda_visible_devices,
-                nproc_per_node=nproc_per_node,
+                suffix=suffix,
                 batch_per_gpu=batch,
                 num_workers=int(base_run["num_workers"]),
                 pin_memory=bool(base_run["pin_memory"]),
@@ -785,12 +883,31 @@ def stabilize(
                 compile_enabled=bool(base_run["compile"]),
                 lr_scale=lr_scale,
                 iters=stability_iters,
-                eval_period=0,
-                checkpoint_period=1000000000,
-                prereq_ckpt=prereq_ckpt,
-                warmup_records=warmup_records,
             )
-            record(results, run, output_root)
+            if run is not None:
+                run = reuse_recorded_run(run)
+            else:
+                run = run_train(
+                    stage=stage,
+                    data_root=data_root,
+                    output_root=output_root,
+                    phase="stability",
+                    suffix=suffix,
+                    cuda_visible_devices=cuda_visible_devices,
+                    nproc_per_node=nproc_per_node,
+                    batch_per_gpu=batch,
+                    num_workers=int(base_run["num_workers"]),
+                    pin_memory=bool(base_run["pin_memory"]),
+                    fp8=bool(base_run["fp8"]),
+                    compile_enabled=bool(base_run["compile"]),
+                    lr_scale=lr_scale,
+                    iters=stability_iters,
+                    eval_period=0,
+                    checkpoint_period=1000000000,
+                    prereq_ckpt=prereq_ckpt,
+                    warmup_records=warmup_records,
+                )
+                record(results, run, output_root)
             if is_success(run):
                 return run
             if run["status"] == "nan":
@@ -857,8 +974,9 @@ def benchmark_with_batch_backoff(
     results: dict[str, Any],
 ) -> dict[str, Any]:
     step = 2 if stage.even_batch else 1
-    batch = normalize_batch(start_batch, even=stage.even_batch, min_batch=stage.min_batch)
-    while batch >= stage.min_batch:
+    start_batch = normalize_batch_down(start_batch, even=stage.even_batch, min_batch=stage.min_batch)
+
+    def try_benchmark(batch: int) -> dict[str, Any] | None:
         try:
             return benchmark_io_and_mode(
                 stage=stage,
@@ -886,8 +1004,43 @@ def benchmark_with_batch_backoff(
             }
             results.setdefault("benchmark_backoffs", []).append(failure)
             write_json(results, output_root)
-            batch -= step
-    raise RuntimeError(f"No successful worker/pin benchmark for {stage.name} at or below batch={start_batch}")
+            return None
+
+    start_result = try_benchmark(start_batch)
+    if start_result is not None:
+        return start_result
+
+    high_failure = start_batch
+    probe = normalize_batch_down(start_batch // 2, even=stage.even_batch, min_batch=stage.min_batch)
+    low_success: tuple[int, dict[str, Any]] | None = None
+    while probe >= stage.min_batch:
+        result = try_benchmark(probe)
+        if result is not None:
+            low_success = (probe, result)
+            break
+        high_failure = probe
+        if probe == stage.min_batch:
+            break
+        next_probe = normalize_batch_down(probe // 2, even=stage.even_batch, min_batch=stage.min_batch)
+        if next_probe >= probe:
+            next_probe = probe - step
+        probe = max(stage.min_batch, next_probe)
+
+    if low_success is None:
+        raise RuntimeError(f"No successful worker/pin benchmark for {stage.name} at or below batch={start_batch}")
+
+    low_batch, low_run = low_success
+    while high_failure - low_batch > step:
+        mid = (low_batch + high_failure) // 2
+        mid = normalize_batch_down(mid, even=stage.even_batch, min_batch=stage.min_batch)
+        if mid <= low_batch:
+            mid = low_batch + step
+        result = try_benchmark(mid)
+        if result is not None:
+            low_batch, low_run = mid, result
+        else:
+            high_failure = mid
+    return low_run
 
 
 def search_stage(
