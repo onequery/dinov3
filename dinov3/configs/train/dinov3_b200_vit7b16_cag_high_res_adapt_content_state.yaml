@@ -48,6 +48,8 @@ gram:
   compute_stats: false
   loss_weight: 1.0
   ema_teacher: false
+  # Runtime checkpoint path is injected by launchers/b200/run_3_high-res-adapt_content_state.sh.
+  ckpt: null
   it_load_ema_teacher: -1
   rep_update: false
   update_frequency: 10000
@@ -88,9 +90,9 @@ content_state:
   normalize_state: true
   recon_target_detach: true
 train:
-  batch_size_per_gpu: 8
+  batch_size_per_gpu: 44
   dataset_path: null
-  num_workers: 8
+  num_workers: 1
   OFFICIAL_EPOCH_LENGTH: 1000
   cache_dataset: true
   use_teacher_head: true
@@ -111,6 +113,7 @@ student:
   pretrained_weights: ""
   ffn_layer: swiglu64
   ffn_ratio: 3
+  # Runtime checkpoint path is injected by launchers/b200/run_3_high-res-adapt_content_state.sh.
   resume_from_teacher_chkpt: ""
   qkv_bias: false
   proj_bias: true

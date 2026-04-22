@@ -40,20 +40,20 @@ continuity:
 content_state:
   enabled: false
 train:
-  batch_size_per_gpu: 16
+  batch_size_per_gpu: 264
   dataset_path: null
-  num_workers: 8
+  num_workers: 4
   OFFICIAL_EPOCH_LENGTH: 1250
   cache_dataset: true
   use_teacher_head: true
   learn_from_teacher_tokens: false
   centering: sinkhorn_knopp
   checkpointing: true
-  checkpointing_full: false
+  checkpointing_full: true
   compile: true
   cudagraphs: false
   sharded_eval_checkpoint: true
-  pin_memory: false
+  pin_memory: true
 student:
   arch: vit_7b
   patch_size: 16

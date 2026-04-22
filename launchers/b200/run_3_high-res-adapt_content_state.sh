@@ -14,7 +14,4 @@ require_file_unless_dry_run "${STAGE2_CKPT}"
 launch_b200_stage \
   "stage3" \
   "gram.ckpt=${STAGE2_CKPT}" \
-  "student.resume_from_teacher_chkpt=${STAGE2_CKPT}" \
-  "content_state.head_hidden_dim=${CONTENT_STATE_HEAD_HIDDEN_DIM}" \
-  "content_state.head_out_dim=${CONTENT_STATE_HEAD_OUT_DIM}" \
-  "content_state.decoder_hidden_dim=${CONTENT_STATE_DECODER_HIDDEN_DIM}"
+  "student.resume_from_teacher_chkpt=${STAGE2_CKPT}"
